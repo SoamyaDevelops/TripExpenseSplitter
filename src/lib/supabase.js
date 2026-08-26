@@ -45,7 +45,6 @@ export const updateUserProfile = async (userId, profileData) => {
 
     if (error) throw error;
     
-    // Also update auth metadata
     await supabase.auth.updateUser({
       data: {
         full_name: profileData.full_name,
@@ -83,20 +82,14 @@ export const sendSupabaseFriendRequest = async (requesterId, addresseeId) => {
 export const fetchSupabaseFriendships = async (userId) => {
   if (!userId) return [];
   try {
-    // Query friendships where user is requester or addressee
     const { data, error } = await supabase
       .from('friendships')
       .select('*')
       .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
 
-    if (error) {
-      console.warn('Supabase fetch friendships notice:', error.message);
-      return [];
-    }
-
+    if (error) return [];
     if (!data || data.length === 0) return [];
 
-    // Fetch profiles for all involved user IDs to get full names, emails, avatars
     const userIds = new Set();
     data.forEach(f => {
       userIds.add(f.requester_id);
@@ -111,8 +104,7 @@ export const fetchSupabaseFriendships = async (userId) => {
     const profileMap = {};
     (profileList || []).forEach(p => { profileMap[p.id] = p; });
 
-    // Format rich friendship objects
-    const enriched = data.map(f => {
+    return data.map(f => {
       const reqP = profileMap[f.requester_id] || { full_name: 'Friend', email: '' };
       const addP = profileMap[f.addressee_id] || { full_name: 'Friend', email: '' };
       return {
@@ -125,8 +117,6 @@ export const fetchSupabaseFriendships = async (userId) => {
         addressee_color: addP.avatar_color || '#059669'
       };
     });
-
-    return enriched;
   } catch (err) {
     console.error('Failed to fetch friendships from Supabase:', err);
     return [];
@@ -155,6 +145,110 @@ export const respondSupabaseFriendRequest = async (friendshipId, newStatus) => {
   }
 };
 
+// REAL SUPABASE GROUPS & GROUP MEMBERS FUNCTIONS
+export const createSupabaseGroup = async ({ name, description, created_by, members }) => {
+  try {
+    const { data: groupData, error: groupErr } = await supabase
+      .from('groups')
+      .insert({
+        name,
+        description,
+        created_by
+      })
+      .select()
+      .single();
+
+    if (groupErr) throw groupErr;
+
+    const group_id = groupData.id;
+
+    // Prepare member rows
+    const memberRows = members.map(m => ({
+      group_id,
+      user_id: m.user_id || m.id || null,
+      display_name: m.display_name || m.name,
+      email: m.email || '',
+      avatar_color: m.avatar_color || '#4f46e5'
+    }));
+
+    const { data: memberData, error: memberErr } = await supabase
+      .from('group_members')
+      .insert(memberRows)
+      .select();
+
+    if (memberErr) console.warn('Group members insert warning:', memberErr.message);
+
+    return { success: true, group: groupData, members: memberData || memberRows };
+  } catch (err) {
+    console.error('Failed to create group in Supabase:', err);
+    return { success: false, error: err.message };
+  }
+};
+
+export const fetchSupabaseUserGroups = async (userEmail, userId) => {
+  try {
+    // 1. Fetch group_members where user matches email or user_id
+    let memberQuery = supabase.from('group_members').select('*');
+    if (userEmail && userId) {
+      memberQuery = memberQuery.or(`user_id.eq.${userId},email.ilike.${userEmail}`);
+    } else if (userId) {
+      memberQuery = memberQuery.eq('user_id', userId);
+    } else if (userEmail) {
+      memberQuery = memberQuery.ilike('email', userEmail);
+    }
+
+    const { data: myMemberships, error: memErr } = await memberQuery;
+    if (memErr) return { groups: [], groupMembers: [] };
+    if (!myMemberships || myMemberships.length === 0) return { groups: [], groupMembers: [] };
+
+    const groupIds = Array.from(new Set(myMemberships.map(m => m.group_id)));
+
+    // 2. Fetch all groups matching groupIds
+    const { data: groupList, error: groupErr } = await supabase
+      .from('groups')
+      .select('*')
+      .in('id', groupIds)
+      .order('created_at', { ascending: false });
+
+    if (groupErr) return { groups: [], groupMembers: [] };
+
+    // 3. Fetch all members for these groups
+    const { data: allGroupMembers } = await supabase
+      .from('group_members')
+      .select('*')
+      .in('group_id', groupIds);
+
+    return {
+      groups: groupList || [],
+      groupMembers: allGroupMembers || []
+    };
+  } catch (err) {
+    console.error('Failed to fetch user groups from Supabase:', err);
+    return { groups: [], groupMembers: [] };
+  }
+};
+
+export const addSupabaseGroupMember = async (groupId, display_name, email, avatar_color = '#4f46e5') => {
+  try {
+    const { data, error } = await supabase
+      .from('group_members')
+      .insert({
+        group_id: groupId,
+        display_name,
+        email,
+        avatar_color
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { success: true, member: data };
+  } catch (err) {
+    console.error('Failed to add group member in Supabase:', err);
+    return { success: false, error: err.message };
+  }
+};
+
 // Initial store fallback structure
 export const EMPTY_INITIAL_DATA = {
   groups: [],
@@ -169,14 +263,14 @@ export const EMPTY_INITIAL_DATA = {
 
 // Local storage state helpers
 export const getLocalStore = () => {
-  const data = localStorage.getItem('trip_split_friends_v6');
+  const data = localStorage.getItem('trip_split_groups_v7');
   if (!data) {
-    localStorage.setItem('trip_split_friends_v6', JSON.stringify(EMPTY_INITIAL_DATA));
+    localStorage.setItem('trip_split_groups_v7', JSON.stringify(EMPTY_INITIAL_DATA));
     return EMPTY_INITIAL_DATA;
   }
   return JSON.parse(data);
 };
 
 export const saveLocalStore = (data) => {
-  localStorage.setItem('trip_split_friends_v6', JSON.stringify(data));
+  localStorage.setItem('trip_split_groups_v7', JSON.stringify(data));
 };

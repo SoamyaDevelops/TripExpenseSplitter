@@ -16,7 +16,10 @@ import {
   saveLocalStore,
   sendSupabaseFriendRequest,
   fetchSupabaseFriendships,
-  respondSupabaseFriendRequest
+  respondSupabaseFriendRequest,
+  createSupabaseGroup,
+  fetchSupabaseUserGroups,
+  addSupabaseGroupMember
 } from './lib/supabase';
 import { User, Receipt, Zap, MessageSquare, ArrowLeft, UserPlus } from 'lucide-react';
 import './App.css';
@@ -55,6 +58,7 @@ export default function App() {
       if (session?.user) {
         setSessionUser(session.user);
         fetchSupabaseUserProfile(session.user);
+        loadSupabaseGroups(session.user);
       }
     });
 
@@ -62,6 +66,7 @@ export default function App() {
       if (session?.user) {
         setSessionUser(session.user);
         fetchSupabaseUserProfile(session.user);
+        loadSupabaseGroups(session.user);
       } else {
         setSessionUser(null);
         setUserProfile(null);
@@ -72,24 +77,43 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Poll for live friendship requests every 4 seconds
+  // Poll for live friendship requests & live groups every 4 seconds
   useEffect(() => {
-    if (!userProfile?.id) return;
+    if (!sessionUser) return;
 
-    const loadFriendships = async () => {
-      const live = await fetchSupabaseFriendships(userProfile.id);
-      if (live && live.length > 0) {
-        setFriendships(live);
-        const store = getLocalStore();
-        store.friendships = live;
-        saveLocalStore(store);
+    const syncLiveSupabaseData = async () => {
+      // 1. Sync Friendships
+      if (userProfile?.id) {
+        const liveFriends = await fetchSupabaseFriendships(userProfile.id);
+        if (liveFriends && liveFriends.length > 0) {
+          setFriendships(liveFriends);
+        }
+      }
+
+      // 2. Sync Groups
+      const liveGroupRes = await fetchSupabaseUserGroups(sessionUser.email, sessionUser.id);
+      if (liveGroupRes.groups && liveGroupRes.groups.length > 0) {
+        setGroups(liveGroupRes.groups);
+        setGroupMembers(liveGroupRes.groupMembers);
       }
     };
 
-    loadFriendships();
-    const interval = setInterval(loadFriendships, 4000);
+    syncLiveSupabaseData();
+    const interval = setInterval(syncLiveSupabaseData, 4000);
     return () => clearInterval(interval);
-  }, [userProfile?.id]);
+  }, [sessionUser, userProfile?.id]);
+
+  const loadSupabaseGroups = async (user) => {
+    const res = await fetchSupabaseUserGroups(user.email, user.id);
+    if (res.groups && res.groups.length > 0) {
+      setGroups(res.groups);
+      setGroupMembers(res.groupMembers);
+      const store = getLocalStore();
+      store.groups = res.groups;
+      store.groupMembers = res.groupMembers;
+      saveLocalStore(store);
+    }
+  };
 
   const fetchSupabaseUserProfile = async (user) => {
     try {
@@ -141,7 +165,6 @@ export default function App() {
     setFriendships(store.friendships || []);
   };
 
-  // Compute confirmed accepted friends list for friend pickers
   const confirmedFriends = (userProfile ? friendships.filter(f => f.status === 'accepted') : []).map(f => {
     const isMeRequester = f.requester_id === userProfile?.id;
     return {
@@ -196,10 +219,35 @@ export default function App() {
     setViewMode('trip_detail');
   };
 
-  // Create Group Handler (Using selected friend objects)
-  const handleCreateGroup = ({ name, description, members }) => {
-    const store = getLocalStore();
-    const newGroup = {
+  // Create Group Handler with Live Supabase Sync
+  const handleCreateGroup = async ({ name, description, members }) => {
+    const colorList = ['#4f46e5', '#059669', '#d97706', '#e11d48', '#0284c7', '#7c3aed'];
+    const myName = userProfile?.name || 'Me';
+
+    const allMembersToSave = [
+      {
+        user_id: sessionUser?.id,
+        display_name: myName,
+        email: sessionUser?.email,
+        avatar_color: userProfile?.avatar_color || colorList[0]
+      },
+      ...members.map((fObj, idx) => ({
+        user_id: fObj.id || null,
+        display_name: fObj.name || fObj.display_name,
+        email: fObj.email,
+        avatar_color: fObj.avatar_color || colorList[(idx + 1) % colorList.length]
+      }))
+    ];
+
+    // Persist to Supabase DB
+    const res = await createSupabaseGroup({
+      name,
+      description,
+      created_by: sessionUser?.id,
+      members: allMembersToSave
+    });
+
+    const createdGroup = res.group || {
       id: `group-${Date.now()}`,
       name,
       description,
@@ -207,39 +255,42 @@ export default function App() {
       created_at: new Date().toISOString()
     };
 
+    const store = getLocalStore();
     if (!store.groups) store.groups = [];
-    store.groups.unshift(newGroup);
-
-    const colorList = ['#4f46e5', '#059669', '#d97706', '#e11d48', '#0284c7', '#7c3aed'];
-    const myName = userProfile?.name || 'Me';
-    const myGroupMember = {
-      id: `gm-${Date.now()}-0`,
-      group_id: newGroup.id,
-      display_name: myName,
-      email: sessionUser?.email || 'me@college.edu',
-      avatar_color: userProfile?.avatar_color || colorList[0]
-    };
+    store.groups.unshift(createdGroup);
 
     if (!store.groupMembers) store.groupMembers = [];
-    store.groupMembers.push(myGroupMember);
-
-    // Add selected friends
-    members.forEach((fObj, idx) => {
-      store.groupMembers.push({
-        id: `gm-${Date.now()}-${idx + 1}`,
-        group_id: newGroup.id,
-        display_name: fObj.name || fObj.display_name,
-        email: fObj.email,
-        avatar_color: fObj.avatar_color || colorList[(idx + 1) % colorList.length]
-      });
-    });
+    (res.members || []).forEach(m => store.groupMembers.push(m));
 
     saveLocalStore(store);
 
-    setGroups([newGroup, ...groups]);
+    setGroups([createdGroup, ...groups]);
     setGroupMembers(store.groupMembers);
-    setActiveGroup(newGroup);
+    setActiveGroup(createdGroup);
     setViewMode('group_detail');
+  };
+
+  // Add Member to specific Group with Live Supabase Sync
+  const handleAddMemberToGroup = async (groupId, memberName, email = '') => {
+    const colorList = ['#4f46e5', '#059669', '#d97706', '#e11d48', '#0284c7', '#7c3aed'];
+    const avatarColor = colorList[groupMembers.length % colorList.length];
+
+    const res = await addSupabaseGroupMember(groupId, memberName, email, avatarColor);
+
+    const newGM = res.member || {
+      id: `gm-${Date.now()}`,
+      group_id: groupId,
+      display_name: memberName,
+      email: email || `${memberName.toLowerCase().replace(/\s+/g, '')}@college.edu`,
+      avatar_color: avatarColor
+    };
+
+    const store = getLocalStore();
+    if (!store.groupMembers) store.groupMembers = [];
+    store.groupMembers.push(newGM);
+    saveLocalStore(store);
+
+    setGroupMembers([...store.groupMembers]);
   };
 
   // FRIEND REQUEST HANDLERS
@@ -292,23 +343,6 @@ export default function App() {
 
     saveLocalStore(store);
     setFriendships([...store.friendships]);
-  };
-
-  // Add Member to specific Group
-  const handleAddMemberToGroup = (groupId, memberName, email = '') => {
-    const store = getLocalStore();
-    const colorList = ['#4f46e5', '#059669', '#d97706', '#e11d48', '#0284c7', '#7c3aed'];
-    const newGM = {
-      id: `gm-${Date.now()}`,
-      group_id: groupId,
-      display_name: memberName,
-      email: email || `${memberName.toLowerCase().replace(/\s+/g, '')}@college.edu`,
-      avatar_color: colorList[(store.groupMembers?.length || 0) % colorList.length]
-    };
-    if (!store.groupMembers) store.groupMembers = [];
-    store.groupMembers.push(newGM);
-    saveLocalStore(store);
-    setGroupMembers([...store.groupMembers]);
   };
 
   // Create Trip inside Group Handler
