@@ -1,11 +1,12 @@
 ﻿import React, { useState } from 'react';
-import { ArrowLeft, Compass, Plus, Users, UserPlus, Calendar, Check, CheckCircle2, History, X } from 'lucide-react';
+import { ArrowLeft, Compass, Plus, Users, UserPlus, Calendar, Check, CheckCircle2, History, X, Search, UserCheck } from 'lucide-react';
 
 export default function GroupDetail({
   group,
   groupMembers = [],
   trips = [],
   allExpenses = [],
+  confirmedFriends = [],
   onBackToGroups,
   onSelectTrip,
   onCreateTripInGroup,
@@ -20,11 +21,22 @@ export default function GroupDetail({
   const [tripDesc, setTripDesc] = useState('');
   const [selectedMemberIds, setSelectedMemberIds] = useState(groupMembers.map(m => m.id));
 
-  // Add member states
-  const [newMemberName, setNewMemberName] = useState('');
+  // Add member friend selection
+  const [selectedFriendToAdd, setSelectedFriendToAdd] = useState('');
+  const [customMemberName, setCustomMemberName] = useState('');
+  const [friendSearchQuery, setFriendSearchQuery] = useState('');
 
   const activeTrips = trips.filter(t => t.status !== 'completed');
   const pastTrips = trips.filter(t => t.status === 'completed');
+
+  // Filter friends who are not already in this group
+  const existingEmails = new Set(groupMembers.map(m => m.email?.toLowerCase()));
+  const availableFriends = confirmedFriends.filter(f => !existingEmails.has(f.email?.toLowerCase()));
+
+  const filteredAvailableFriends = availableFriends.filter(f =>
+    f.name.toLowerCase().includes(friendSearchQuery.toLowerCase()) ||
+    f.email.toLowerCase().includes(friendSearchQuery.toLowerCase())
+  );
 
   const handleCreateTripSubmit = (e) => {
     e.preventDefault();
@@ -46,10 +58,14 @@ export default function GroupDetail({
 
   const handleAddMemberSubmit = (e) => {
     e.preventDefault();
-    if (!newMemberName.trim()) return;
+    const friendObj = confirmedFriends.find(f => f.id === selectedFriendToAdd);
+    const memberName = friendObj ? friendObj.name : customMemberName.trim();
 
-    onAddMemberToGroup(group.id, newMemberName.trim());
-    setNewMemberName('');
+    if (!memberName) return;
+
+    onAddMemberToGroup(group.id, memberName, friendObj ? friendObj.email : '');
+    setCustomMemberName('');
+    setSelectedFriendToAdd('');
     setShowAddMemberModal(false);
   };
 
@@ -344,28 +360,85 @@ export default function GroupDetail({
         </div>
       )}
 
-      {/* ADD MEMBER TO GROUP MODAL */}
+      {/* ADD MEMBER TO GROUP MODAL (WITH CONFIRMED FRIENDS PICKER & SEARCH) */}
       {showAddMemberModal && (
         <div className="modal-overlay" onClick={() => setShowAddMemberModal(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ padding: '1.75rem', maxWidth: '420px' }}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ padding: '1.75rem', maxWidth: '460px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-              <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Add Member to {group.name}</h3>
+              <div>
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Add Member to {group.name}</h3>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Select from your confirmed friends</p>
+              </div>
               <button onClick={() => setShowAddMemberModal(false)} style={{ padding: '0.4rem', borderRadius: '50%', background: 'var(--bg-subtle)' }}>
                 <X size={16} />
               </button>
             </div>
 
             <form onSubmit={handleAddMemberSubmit}>
-              <div className="form-group">
-                <label className="form-label">Member Name or Email</label>
+              {availableFriends.length > 0 && (
+                <div className="form-group">
+                  <label className="form-label">Select Friend from Your Network:</label>
+
+                  {/* Friend search bar */}
+                  <div style={{ position: 'relative', marginBottom: '0.6rem' }}>
+                    <Search size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <input
+                      type="text"
+                      className="form-control"
+                      style={{ paddingLeft: '2.2rem', padding: '0.45rem 0.75rem', fontSize: '0.825rem' }}
+                      placeholder="Search friends..."
+                      value={friendSearchQuery}
+                      onChange={e => setFriendSearchQuery(e.target.value)}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '160px', overflowY: 'auto' }}>
+                    {filteredAvailableFriends.map(friend => {
+                      const isSelected = selectedFriendToAdd === friend.id;
+                      return (
+                        <div
+                          key={friend.id}
+                          onClick={() => {
+                            setSelectedFriendToAdd(isSelected ? '' : friend.id);
+                            setCustomMemberName('');
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '0.5rem 0.75rem',
+                            borderRadius: 'var(--radius-sm)',
+                            border: `1.5px solid ${isSelected ? 'var(--primary)' : 'var(--border-color)'}`,
+                            background: isSelected ? 'var(--primary-light)' : 'var(--bg-card)',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <div className="avatar-circle" style={{ width: '22px', height: '22px', fontSize: '0.7rem', backgroundColor: friend.avatar_color }}>
+                              {friend.name.charAt(0).toUpperCase()}
+                            </div>
+                            <span style={{ fontSize: '0.85rem', fontWeight: isSelected ? 700 : 500 }}>{friend.name}</span>
+                          </div>
+                          {isSelected && <Check size={14} color="var(--primary)" />}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="form-group" style={{ marginTop: '1rem' }}>
+                <label className="form-label">Or Type Display Name</label>
                 <input
                   type="text"
                   className="form-control"
                   placeholder="e.g. Sanya Roy"
-                  value={newMemberName}
-                  onChange={e => setNewMemberName(e.target.value)}
-                  required
-                  autoFocus
+                  value={customMemberName}
+                  onChange={e => {
+                    setCustomMemberName(e.target.value);
+                    setSelectedFriendToAdd('');
+                  }}
+                  required={!selectedFriendToAdd}
                 />
               </div>
 

@@ -111,7 +111,6 @@ export default function App() {
         };
         setUserProfile(profileObj);
 
-        // Fetch friendships for this profile
         const liveFriendships = await fetchSupabaseFriendships(data.id);
         if (liveFriendships && liveFriendships.length > 0) {
           setFriendships(liveFriendships);
@@ -141,6 +140,17 @@ export default function App() {
     setTrips(store.trips || []);
     setFriendships(store.friendships || []);
   };
+
+  // Compute confirmed accepted friends list for friend pickers
+  const confirmedFriends = (userProfile ? friendships.filter(f => f.status === 'accepted') : []).map(f => {
+    const isMeRequester = f.requester_id === userProfile?.id;
+    return {
+      id: isMeRequester ? f.addressee_id : f.requester_id,
+      name: isMeRequester ? f.addressee_name : f.requester_name,
+      email: isMeRequester ? f.addressee_email : f.requester_email,
+      avatar_color: isMeRequester ? f.addressee_color : f.requester_color
+    };
+  });
 
   // Open Group Detail
   const handleSelectGroup = (group) => {
@@ -186,7 +196,7 @@ export default function App() {
     setViewMode('trip_detail');
   };
 
-  // Create Group Handler
+  // Create Group Handler (Using selected friend objects)
   const handleCreateGroup = ({ name, description, members }) => {
     const store = getLocalStore();
     const newGroup = {
@@ -213,13 +223,14 @@ export default function App() {
     if (!store.groupMembers) store.groupMembers = [];
     store.groupMembers.push(myGroupMember);
 
-    members.forEach((mName, idx) => {
+    // Add selected friends
+    members.forEach((fObj, idx) => {
       store.groupMembers.push({
         id: `gm-${Date.now()}-${idx + 1}`,
         group_id: newGroup.id,
-        display_name: mName,
-        email: `${mName.toLowerCase().replace(/\s+/g, '')}@college.edu`,
-        avatar_color: colorList[(idx + 1) % colorList.length]
+        display_name: fObj.name || fObj.display_name,
+        email: fObj.email,
+        avatar_color: fObj.avatar_color || colorList[(idx + 1) % colorList.length]
       });
     });
 
@@ -231,14 +242,12 @@ export default function App() {
     setViewMode('group_detail');
   };
 
-  // FRIEND REQUEST HANDLERS WITH LIVE SUPABASE PERSISTENCE
+  // FRIEND REQUEST HANDLERS
   const handleSendFriendRequest = async (targetProfile) => {
     if (!userProfile?.id) return;
 
-    // Persist to Supabase DB
     const res = await sendSupabaseFriendRequest(userProfile.id, targetProfile.id);
 
-    // Also update local state
     const newRequest = {
       id: res.data?.[0]?.id || `fr-${Date.now()}`,
       requester_id: userProfile.id,
@@ -286,14 +295,14 @@ export default function App() {
   };
 
   // Add Member to specific Group
-  const handleAddMemberToGroup = (groupId, memberName) => {
+  const handleAddMemberToGroup = (groupId, memberName, email = '') => {
     const store = getLocalStore();
     const colorList = ['#4f46e5', '#059669', '#d97706', '#e11d48', '#0284c7', '#7c3aed'];
     const newGM = {
       id: `gm-${Date.now()}`,
       group_id: groupId,
       display_name: memberName,
-      email: `${memberName.toLowerCase().replace(/\s+/g, '')}@college.edu`,
+      email: email || `${memberName.toLowerCase().replace(/\s+/g, '')}@college.edu`,
       avatar_color: colorList[(store.groupMembers?.length || 0) % colorList.length]
     };
     if (!store.groupMembers) store.groupMembers = [];
@@ -492,6 +501,7 @@ export default function App() {
             groups={groups}
             allGroupMembers={groupMembers}
             allTrips={trips}
+            confirmedFriends={confirmedFriends}
             onSelectGroup={handleSelectGroup}
             onCreateGroup={handleCreateGroup}
           />
@@ -504,6 +514,7 @@ export default function App() {
             groupMembers={groupMembers.filter(m => m.group_id === activeGroup.id)}
             trips={trips.filter(t => t.group_id === activeGroup.id)}
             allExpenses={expenses}
+            confirmedFriends={confirmedFriends}
             onBackToGroups={() => setViewMode('groups')}
             onSelectTrip={handleSelectTrip}
             onCreateTripInGroup={handleCreateTripInGroup}
