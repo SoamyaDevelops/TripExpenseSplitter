@@ -8,12 +8,15 @@ import ExpenseList from './components/ExpenseList';
 import AddExpenseModal from './components/AddExpenseModal';
 import SettlementView from './components/SettlementView';
 import TripChat from './components/TripChat';
+import ProfileModal from './components/ProfileModal';
+import FriendsManager from './components/FriendsManager';
 import { supabase, getLocalStore, saveLocalStore } from './lib/supabase';
 import { User, Receipt, Zap, MessageSquare, ArrowLeft, UserPlus } from 'lucide-react';
 import './App.css';
 
 export default function App() {
   const [sessionUser, setSessionUser] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
 
   // Hierarchy Data
   const [groups, setGroups] = useState([]);
@@ -26,6 +29,7 @@ export default function App() {
   const [expenses, setExpenses] = useState([]);
   const [settlements, setSettlements] = useState([]);
   const [chatMessages, setChatMessages] = useState([]);
+  const [friendships, setFriendships] = useState([]);
 
   // Navigation Level: 'groups' | 'group_detail' | 'trip_detail'
   const [viewMode, setViewMode] = useState('groups');
@@ -34,6 +38,8 @@ export default function App() {
   // Modals
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
   const [showAddFriendModal, setShowAddFriendModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showFriendsModal, setShowFriendsModal] = useState(false);
   const [newFriendName, setNewFriendName] = useState('');
 
   // Initialize data on mount
@@ -41,14 +47,17 @@ export default function App() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         setSessionUser(session.user);
+        fetchSupabaseUserProfile(session.user);
       }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         setSessionUser(session.user);
+        fetchSupabaseUserProfile(session.user);
       } else {
         setSessionUser(null);
+        setUserProfile(null);
       }
     });
 
@@ -56,16 +65,52 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  const fetchSupabaseUserProfile = async (user) => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (data) {
+        setUserProfile({
+          id: data.id,
+          name: data.full_name || user.email.split('@')[0],
+          full_name: data.full_name,
+          email: data.email || user.email,
+          phone: data.phone || '',
+          bio: data.bio || '',
+          avatar_color: data.avatar_color || '#4f46e5'
+        });
+      } else {
+        setUserProfile({
+          id: user.id,
+          name: user.user_metadata?.full_name || user.email.split('@')[0],
+          email: user.email,
+          avatar_color: '#4f46e5'
+        });
+      }
+    } catch (err) {
+      setUserProfile({
+        id: user.id,
+        name: user.user_metadata?.full_name || user.email.split('@')[0],
+        email: user.email,
+        avatar_color: '#4f46e5'
+      });
+    }
+  };
+
   const loadData = () => {
     const store = getLocalStore();
     setGroups(store.groups || []);
     setGroupMembers(store.groupMembers || []);
     setTrips(store.trips || []);
+    setFriendships(store.friendships || []);
   };
 
   // Open Group Detail
   const handleSelectGroup = (group) => {
-    const store = getLocalStore();
     setActiveGroup(group);
     setViewMode('group_detail');
   };
@@ -75,11 +120,9 @@ export default function App() {
     const store = getLocalStore();
     setActiveTrip(trip);
 
-    // Find group for this trip
     const parentGroup = (store.groups || []).find(g => g.id === trip.group_id);
     if (parentGroup) setActiveGroup(parentGroup);
 
-    // Load trip members, expenses, settlements, chat
     const members = (store.tripMembers || []).filter(m => m.trip_id === trip.id);
     const exps = (store.expenses || []).filter(e => e.trip_id === trip.id);
     const sets = (store.settlements || []).filter(s => s.trip_id === trip.id);
@@ -93,13 +136,12 @@ export default function App() {
     if (members.length > 0) {
       setCurrentMember(members[0]);
     } else {
-      // Auto add user as trip member if empty
       const myMember = {
         id: `tm-${Date.now()}`,
         trip_id: trip.id,
-        name: sessionUser?.user_metadata?.full_name || 'Me',
+        name: userProfile?.name || 'Me',
         email: sessionUser?.email || 'me@college.edu',
-        avatar_color: '#4f46e5'
+        avatar_color: userProfile?.avatar_color || '#4f46e5'
       };
       if (!store.tripMembers) store.tripMembers = [];
       store.tripMembers.push(myMember);
@@ -125,21 +167,19 @@ export default function App() {
     if (!store.groups) store.groups = [];
     store.groups.unshift(newGroup);
 
-    // Add user as group member
     const colorList = ['#4f46e5', '#059669', '#d97706', '#e11d48', '#0284c7', '#7c3aed'];
-    const myName = sessionUser?.user_metadata?.full_name || 'Me';
+    const myName = userProfile?.name || 'Me';
     const myGroupMember = {
       id: `gm-${Date.now()}-0`,
       group_id: newGroup.id,
       display_name: myName,
       email: sessionUser?.email || 'me@college.edu',
-      avatar_color: colorList[0]
+      avatar_color: userProfile?.avatar_color || colorList[0]
     };
 
     if (!store.groupMembers) store.groupMembers = [];
     store.groupMembers.push(myGroupMember);
 
-    // Add initial friends to group
     members.forEach((mName, idx) => {
       store.groupMembers.push({
         id: `gm-${Date.now()}-${idx + 1}`,
@@ -158,23 +198,48 @@ export default function App() {
     setViewMode('group_detail');
   };
 
-  // Search & Add Friend Handler
-  const handleSearchAndAddFriend = (friendName) => {
+  // FRIEND REQUEST HANDLERS
+  const handleSendFriendRequest = (targetProfile) => {
     const store = getLocalStore();
-    if (activeGroup) {
-      const colorList = ['#4f46e5', '#059669', '#d97706', '#e11d48', '#0284c7', '#7c3aed'];
-      const newGM = {
-        id: `gm-${Date.now()}`,
-        group_id: activeGroup.id,
-        display_name: friendName,
-        email: `${friendName.toLowerCase().replace(/\s+/g, '')}@college.edu`,
-        avatar_color: colorList[(store.groupMembers?.length || 0) % colorList.length]
-      };
-      if (!store.groupMembers) store.groupMembers = [];
-      store.groupMembers.push(newGM);
-      saveLocalStore(store);
-      setGroupMembers([...store.groupMembers]);
-    }
+    const newRequest = {
+      id: `fr-${Date.now()}`,
+      requester_id: userProfile.id,
+      requester_name: userProfile.name || userProfile.full_name,
+      requester_email: userProfile.email,
+      requester_color: userProfile.avatar_color,
+      addressee_id: targetProfile.id,
+      addressee_name: targetProfile.full_name,
+      addressee_email: targetProfile.email,
+      status: 'pending',
+      created_at: new Date().toISOString()
+    };
+
+    if (!store.friendships) store.friendships = [];
+    store.friendships.unshift(newRequest);
+    saveLocalStore(store);
+
+    setFriendships([...store.friendships]);
+  };
+
+  const handleAcceptFriendRequest = (friendshipId) => {
+    const store = getLocalStore();
+    store.friendships = (store.friendships || []).map(f => {
+      if (f.id === friendshipId) {
+        return { ...f, status: 'accepted', updated_at: new Date().toISOString() };
+      }
+      return f;
+    });
+
+    saveLocalStore(store);
+    setFriendships([...store.friendships]);
+  };
+
+  const handleRejectFriendRequest = (friendshipId) => {
+    const store = getLocalStore();
+    store.friendships = (store.friendships || []).filter(f => f.id !== friendshipId);
+
+    saveLocalStore(store);
+    setFriendships([...store.friendships]);
   };
 
   // Add Member to specific Group
@@ -211,7 +276,6 @@ export default function App() {
     if (!store.trips) store.trips = [];
     store.trips.unshift(newTrip);
 
-    // Map selected group members into trip members
     const activeGMs = (store.groupMembers || []).filter(gm => gm.group_id === group_id && selected_member_ids.includes(gm.id));
     if (!store.tripMembers) store.tripMembers = [];
 
@@ -225,11 +289,10 @@ export default function App() {
       });
     });
 
-    // Initial system chat event
     const initMsg = {
       id: `chat-${Date.now()}`,
       trip_id: newTrip.id,
-      text: `🎉 Trip "${newTrip.title}" was created in group!`,
+      text: `🎉 Trip "${newTrip.title}" was created!`,
       is_system_event: true,
       created_at: new Date().toISOString()
     };
@@ -242,7 +305,7 @@ export default function App() {
     handleSelectTrip(newTrip);
   };
 
-  // Add Expense Handler (With Title for what they spent)
+  // Add Expense Handler
   const handleAddExpense = (newExp) => {
     if (!activeTrip) return;
 
@@ -257,7 +320,6 @@ export default function App() {
     if (!store.expenses) store.expenses = [];
     store.expenses.unshift(created);
 
-    // Post Chat Notification
     const payerName = tripMembers.find(m => m.id === newExp.paid_by)?.name || 'Someone';
     const splitCount = newExp.splits?.length || 1;
     const perPerson = (newExp.amount / splitCount).toFixed(2);
@@ -305,7 +367,6 @@ export default function App() {
     if (!store.settlements) store.settlements = [];
     store.settlements.unshift(newSettlement);
 
-    // Post settlement notification in chat
     const fromName = tripMembers.find(m => m.id === fromMemberId)?.name || 'User';
     const toName = tripMembers.find(m => m.id === toMemberId)?.name || 'User';
 
@@ -349,8 +410,11 @@ export default function App() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setSessionUser(null);
+    setUserProfile(null);
     setViewMode('groups');
   };
+
+  const pendingRequestsCount = (userProfile ? friendships.filter(f => f.addressee_id === userProfile.id && f.status === 'pending') : []).length;
 
   if (!sessionUser) {
     return (
@@ -362,15 +426,18 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* Top Navbar with Breadcrumb Navigation */}
+      {/* Top Navbar with Breadcrumb Navigation & Profile Trigger */}
       <Navbar
         activeGroup={activeGroup}
         activeTrip={viewMode === 'trip_detail' ? activeTrip : null}
-        currentUser={currentMember}
+        currentUser={userProfile || currentMember}
         allMembers={tripMembers}
+        pendingFriendRequestsCount={pendingRequestsCount}
         onChangeCurrentUser={(m) => setCurrentMember(m)}
         onGoToGroups={() => { setViewMode('groups'); setActiveTrip(null); }}
         onGoToGroupDetail={() => { setViewMode('group_detail'); setActiveTrip(null); }}
+        onOpenProfileModal={() => setShowProfileModal(true)}
+        onOpenFriendsModal={() => setShowFriendsModal(true)}
         onLogout={handleLogout}
       />
 
@@ -384,7 +451,7 @@ export default function App() {
             allTrips={trips}
             onSelectGroup={handleSelectGroup}
             onCreateGroup={handleCreateGroup}
-            onSearchAndAddFriend={handleSearchAndAddFriend}
+            onSearchAndAddFriend={() => setShowFriendsModal(true)}
           />
         )}
 
@@ -543,6 +610,25 @@ export default function App() {
         tripMembers={tripMembers}
         currentUser={currentMember}
         onAddExpense={handleAddExpense}
+      />
+
+      {/* Profile Management Modal */}
+      <ProfileModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        currentUser={userProfile}
+        onProfileUpdated={(updated) => setUserProfile(updated)}
+      />
+
+      {/* Friends & Network Manager Modal */}
+      <FriendsManager
+        isOpen={showFriendsModal}
+        onClose={() => setShowFriendsModal(false)}
+        currentUser={userProfile}
+        friendships={friendships}
+        onSendFriendRequest={handleSendFriendRequest}
+        onAcceptFriendRequest={handleAcceptFriendRequest}
+        onRejectFriendRequest={handleRejectFriendRequest}
       />
     </div>
   );

@@ -1,21 +1,35 @@
 ﻿-- ====================================================================
--- TRIP SPLIT: COMPLETE SUPABASE DATABASE SETUP SCRIPT
+-- TRIP SPLIT: COMPLETE SUPABASE DATABASE SETUP SCRIPT (WITH FRIENDSHIPS)
 -- Copy and run this script in your Supabase SQL Editor (https://supabase.com/dashboard)
 -- ====================================================================
 
 -- 1. Enable UUID Extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 2. CREATE PROFILES TABLE (Stores registered user profiles)
+-- 2. CREATE PROFILES TABLE (User profiles synced with Supabase Auth)
 CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     full_name TEXT NOT NULL,
     email TEXT UNIQUE,
+    phone TEXT,
+    bio TEXT,
     avatar_color TEXT DEFAULT '#4f46e5',
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 3. CREATE GROUPS TABLE (College Squads / Friend Circles)
+-- 3. CREATE FRIENDSHIPS TABLE (Friend Requests & Acceptances)
+CREATE TABLE IF NOT EXISTS public.friendships (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    requester_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    addressee_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected')),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT unique_friendship UNIQUE (requester_id, addressee_id)
+);
+
+-- 4. CREATE GROUPS TABLE (College Squads / Friend Circles)
 CREATE TABLE IF NOT EXISTS public.groups (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
@@ -24,7 +38,7 @@ CREATE TABLE IF NOT EXISTS public.groups (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. CREATE GROUP MEMBERS TABLE
+-- 5. CREATE GROUP MEMBERS TABLE
 CREATE TABLE IF NOT EXISTS public.group_members (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     group_id UUID NOT NULL REFERENCES public.groups(id) ON DELETE CASCADE,
@@ -36,7 +50,7 @@ CREATE TABLE IF NOT EXISTS public.group_members (
     CONSTRAINT unique_group_user UNIQUE (group_id, user_id)
 );
 
--- 5. CREATE TRIPS TABLE (Belongs to a Group)
+-- 6. CREATE TRIPS TABLE
 CREATE TABLE IF NOT EXISTS public.trips (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     group_id UUID REFERENCES public.groups(id) ON DELETE CASCADE,
@@ -48,7 +62,7 @@ CREATE TABLE IF NOT EXISTS public.trips (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 6. CREATE TRIP MEMBERS TABLE
+-- 7. CREATE TRIP MEMBERS TABLE
 CREATE TABLE IF NOT EXISTS public.trip_members (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     trip_id UUID NOT NULL REFERENCES public.trips(id) ON DELETE CASCADE,
@@ -60,7 +74,7 @@ CREATE TABLE IF NOT EXISTS public.trip_members (
     CONSTRAINT unique_trip_user UNIQUE (trip_id, user_id)
 );
 
--- 7. CREATE EXPENSES TABLE (With title for what they spent)
+-- 8. CREATE EXPENSES TABLE
 CREATE TABLE IF NOT EXISTS public.expenses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     trip_id UUID NOT NULL REFERENCES public.trips(id) ON DELETE CASCADE,
@@ -71,7 +85,7 @@ CREATE TABLE IF NOT EXISTS public.expenses (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 8. CREATE EXPENSE SPLITS TABLE (Individual equal portions)
+-- 9. CREATE EXPENSE SPLITS TABLE
 CREATE TABLE IF NOT EXISTS public.expense_splits (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     expense_id UUID NOT NULL REFERENCES public.expenses(id) ON DELETE CASCADE,
@@ -80,7 +94,7 @@ CREATE TABLE IF NOT EXISTS public.expense_splits (
     CONSTRAINT unique_expense_member UNIQUE (expense_id, member_id)
 );
 
--- 9. CREATE SETTLEMENTS TABLE (Repayments between friends)
+-- 10. CREATE SETTLEMENTS TABLE
 CREATE TABLE IF NOT EXISTS public.settlements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     trip_id UUID NOT NULL REFERENCES public.trips(id) ON DELETE CASCADE,
@@ -90,7 +104,7 @@ CREATE TABLE IF NOT EXISTS public.settlements (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 10. CREATE CHAT MESSAGES TABLE (Group Chat & Activity Logs)
+-- 11. CREATE CHAT MESSAGES TABLE
 CREATE TABLE IF NOT EXISTS public.chat_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     trip_id UUID NOT NULL REFERENCES public.trips(id) ON DELETE CASCADE,
@@ -129,6 +143,7 @@ CREATE TRIGGER on_auth_user_created
 -- ROW LEVEL SECURITY (RLS) POLICIES
 -- ====================================================================
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.friendships ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.groups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.group_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.trips ENABLE ROW LEVEL SECURITY;
@@ -141,6 +156,11 @@ ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow public select profiles" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Allow user insert profiles" ON public.profiles FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow user update profiles" ON public.profiles FOR UPDATE USING (true);
+
+CREATE POLICY "Allow public select friendships" ON public.friendships FOR SELECT USING (true);
+CREATE POLICY "Allow public insert friendships" ON public.friendships FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update friendships" ON public.friendships FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete friendships" ON public.friendships FOR DELETE USING (true);
 
 CREATE POLICY "Allow public select groups" ON public.groups FOR SELECT USING (true);
 CREATE POLICY "Allow public insert groups" ON public.groups FOR INSERT WITH CHECK (true);

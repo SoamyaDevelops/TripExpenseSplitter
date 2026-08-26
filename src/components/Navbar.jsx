@@ -1,14 +1,17 @@
 ﻿import React, { useState } from 'react';
-import { Compass, Users, ChevronRight, LogOut, ChevronDown, UserPlus } from 'lucide-react';
+import { Compass, Users, ChevronRight, LogOut, ChevronDown, User, UserCheck } from 'lucide-react';
 
 export default function Navbar({
   activeGroup,
   activeTrip,
   currentUser,
   allMembers,
+  pendingFriendRequestsCount = 0,
   onChangeCurrentUser,
   onGoToGroups,
   onGoToGroupDetail,
+  onOpenProfileModal,
+  onOpenFriendsModal,
   onLogout
 }) {
   const [showUserDropdown, setShowUserDropdown] = useState(false);
@@ -88,8 +91,40 @@ export default function Navbar({
           </div>
         </div>
 
-        {/* Member Profile Switcher & Logout */}
+        {/* Member Profile Switcher & Actions */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          {/* Friends & Network Trigger */}
+          {currentUser && (
+            <button
+              onClick={onOpenFriendsModal}
+              className="btn btn-secondary btn-sm"
+              style={{ position: 'relative' }}
+              title="Manage Friends & Pending Requests"
+            >
+              <Users size={14} color="var(--primary)" /> Friends
+              {pendingFriendRequestsCount > 0 && (
+                <span style={{
+                  position: 'absolute',
+                  top: '-4px',
+                  right: '-4px',
+                  background: 'var(--danger)',
+                  color: 'white',
+                  borderRadius: '50%',
+                  width: '18px',
+                  height: '18px',
+                  fontSize: '0.7rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 800
+                }}>
+                  {pendingFriendRequestsCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {/* Profile Dropdown */}
           {currentUser && (
             <div style={{ position: 'relative' }}>
               <button
@@ -116,7 +151,7 @@ export default function Navbar({
                   {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
                 </div>
                 <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                  {currentUser.name}
+                  {currentUser.name || currentUser.full_name}
                 </span>
                 <ChevronDown size={14} color="var(--text-secondary)" />
               </button>
@@ -134,44 +169,28 @@ export default function Navbar({
                   padding: '0.5rem',
                   zIndex: 60
                 }} className="animate-pop-in">
-                  {allMembers.length > 0 && (
-                    <>
-                      <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', padding: '0.35rem 0.65rem' }}>
-                        View Portal As:
-                      </p>
-                      {allMembers.map(m => (
-                        <button
-                          key={m.id}
-                          onClick={() => {
-                            onChangeCurrentUser(m);
-                            setShowUserDropdown(false);
-                          }}
-                          style={{
-                            width: '100%',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem',
-                            padding: '0.45rem 0.65rem',
-                            borderRadius: 'var(--radius-sm)',
-                            fontSize: '0.85rem',
-                            fontWeight: m.id === currentUser.id ? 700 : 500,
-                            background: m.id === currentUser.id ? 'var(--primary-light)' : 'transparent',
-                            color: m.id === currentUser.id ? 'var(--primary)' : 'var(--text-primary)',
-                            textAlign: 'left'
-                          }}
-                        >
-                          <div
-                            className="avatar-circle"
-                            style={{ width: '22px', height: '22px', fontSize: '0.7rem', backgroundColor: m.avatar_color }}
-                          >
-                            {m.name.charAt(0)}
-                          </div>
-                          {m.name}
-                        </button>
-                      ))}
-                      <div style={{ borderTop: '1px solid var(--border-color)', margin: '0.4rem 0' }}></div>
-                    </>
-                  )}
+                  <button
+                    onClick={() => {
+                      setShowUserDropdown(false);
+                      onOpenProfileModal();
+                    }}
+                    style={{
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      padding: '0.5rem 0.65rem',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: '0.85rem',
+                      fontWeight: 600,
+                      color: 'var(--text-primary)',
+                      textAlign: 'left'
+                    }}
+                  >
+                    <User size={15} color="var(--primary)" /> Edit Profile (Sync Supabase)
+                  </button>
+
+                  <div style={{ borderTop: '1px solid var(--border-color)', margin: '0.4rem 0' }}></div>
 
                   <button
                     onClick={() => { setShowUserDropdown(false); onLogout(); }}
