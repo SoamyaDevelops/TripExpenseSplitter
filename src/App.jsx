@@ -12,6 +12,8 @@ import ProfileModal from './components/ProfileModal';
 import FriendsManager from './components/FriendsManager';
 import {
   supabase,
+  generateUUID,
+  isValidUUID,
   getLocalStore,
   saveLocalStore,
   sendSupabaseFriendRequest,
@@ -46,7 +48,7 @@ export default function App() {
 
   // Navigation Level: 'groups' | 'group_detail' | 'trip_detail'
   const [viewMode, setViewMode] = useState('groups');
-  const [tripTab, setTripTab] = useState('portal'); // 'portal' | 'expenses' | 'chat' | 'settlement'
+  const [tripTab, setTripTab] = useState('portal');
 
   // Modals
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
@@ -86,7 +88,7 @@ export default function App() {
 
     const syncLiveSupabaseData = async () => {
       // 1. Sync Friendships
-      if (userProfile?.id) {
+      if (userProfile?.id && isValidUUID(userProfile.id)) {
         const liveFriends = await fetchSupabaseFriendships(userProfile.id);
         if (liveFriends && liveFriends.length > 0) {
           setFriendships(liveFriends);
@@ -101,7 +103,7 @@ export default function App() {
       }
 
       // 3. Sync Trips for Active Group
-      if (activeGroup?.id) {
+      if (activeGroup?.id && isValidUUID(activeGroup.id)) {
         const liveTripRes = await fetchSupabaseGroupTrips(activeGroup.id);
         if (liveTripRes.trips) {
           setTrips(prev => {
@@ -112,7 +114,7 @@ export default function App() {
       }
 
       // 4. Sync Workspace for Active Trip
-      if (activeTrip?.id) {
+      if (activeTrip?.id && isValidUUID(activeTrip.id)) {
         const liveWorkspace = await fetchSupabaseTripWorkspace(activeTrip.id);
         if (liveWorkspace.tripMembers && liveWorkspace.tripMembers.length > 0) {
           setTripMembers(liveWorkspace.tripMembers);
@@ -141,6 +143,7 @@ export default function App() {
   };
 
   const fetchSupabaseUserProfile = async (user) => {
+    if (!isValidUUID(user.id)) return;
     try {
       const { data } = await supabase
         .from('profiles')
@@ -205,13 +208,14 @@ export default function App() {
     setActiveGroup(group);
     setViewMode('group_detail');
 
-    // Fetch live trips for this group from Supabase DB
-    const res = await fetchSupabaseGroupTrips(group.id);
-    if (res.trips && res.trips.length > 0) {
-      setTrips(prev => {
-        const otherTrips = prev.filter(t => t.group_id !== group.id);
-        return [...res.trips, ...otherTrips];
-      });
+    if (isValidUUID(group.id)) {
+      const res = await fetchSupabaseGroupTrips(group.id);
+      if (res.trips && res.trips.length > 0) {
+        setTrips(prev => {
+          const otherTrips = prev.filter(t => t.group_id !== group.id);
+          return [...res.trips, ...otherTrips];
+        });
+      }
     }
   };
 
@@ -223,17 +227,24 @@ export default function App() {
     const parentGroup = (store.groups || []).find(g => g.id === trip.group_id);
     if (parentGroup) setActiveGroup(parentGroup);
 
-    // Fetch live workspace from Supabase DB
-    const liveWorkspace = await fetchSupabaseTripWorkspace(trip.id);
-    if (liveWorkspace.tripMembers && liveWorkspace.tripMembers.length > 0) {
-      setTripMembers(liveWorkspace.tripMembers);
-      setExpenses(liveWorkspace.expenses);
-      setSettlements(liveWorkspace.settlements);
-      setChatMessages(liveWorkspace.chatMessages);
+    if (isValidUUID(trip.id)) {
+      const liveWorkspace = await fetchSupabaseTripWorkspace(trip.id);
+      if (liveWorkspace.tripMembers && liveWorkspace.tripMembers.length > 0) {
+        setTripMembers(liveWorkspace.tripMembers);
+        setExpenses(liveWorkspace.expenses);
+        setSettlements(liveWorkspace.settlements);
+        setChatMessages(liveWorkspace.chatMessages);
 
-      // Select current user's member card
-      const myMemberCard = liveWorkspace.tripMembers.find(m => m.user_id === userProfile?.id || m.email === userProfile?.email) || liveWorkspace.tripMembers[0];
-      setCurrentMember(myMemberCard);
+        const myMemberCard = liveWorkspace.tripMembers.find(m => m.user_id === userProfile?.id || m.email === userProfile?.email) || liveWorkspace.tripMembers[0];
+        setCurrentMember(myMemberCard);
+      } else {
+        const members = (store.tripMembers || []).filter(m => m.trip_id === trip.id);
+        setTripMembers(members);
+        setExpenses((store.expenses || []).filter(e => e.trip_id === trip.id));
+        setSettlements((store.settlements || []).filter(s => s.trip_id === trip.id));
+        setChatMessages((store.chatMessages || []).filter(c => c.trip_id === trip.id));
+        if (members.length > 0) setCurrentMember(members[0]);
+      }
     } else {
       const members = (store.tripMembers || []).filter(m => m.trip_id === trip.id);
       setTripMembers(members);
@@ -274,7 +285,7 @@ export default function App() {
     });
 
     const createdGroup = res.group || {
-      id: `group-${Date.now()}`,
+      id: generateUUID(),
       name,
       description,
       created_by: sessionUser?.id,
@@ -304,7 +315,7 @@ export default function App() {
     const res = await addSupabaseGroupMember(groupId, memberName, email, avatarColor);
 
     const newGM = res.member || {
-      id: `gm-${Date.now()}`,
+      id: generateUUID(),
       group_id: groupId,
       display_name: memberName,
       email: email || `${memberName.toLowerCase().replace(/\s+/g, '')}@college.edu`,
@@ -335,7 +346,7 @@ export default function App() {
     });
 
     const createdTrip = res.trip || {
-      id: `trip-${Date.now()}`,
+      id: generateUUID(),
       group_id,
       title,
       description,
@@ -364,7 +375,7 @@ export default function App() {
     const res = await sendSupabaseFriendRequest(userProfile.id, targetProfile.id);
 
     const newRequest = {
-      id: res.data?.[0]?.id || `fr-${Date.now()}`,
+      id: res.data?.[0]?.id || generateUUID(),
       requester_id: userProfile.id,
       requester_name: userProfile.name || userProfile.full_name,
       requester_email: userProfile.email,
@@ -415,7 +426,7 @@ export default function App() {
 
     const store = getLocalStore();
     const created = {
-      id: `exp-${Date.now()}`,
+      id: generateUUID(),
       trip_id: activeTrip.id,
       ...newExp,
       created_at: new Date().toISOString()
@@ -429,7 +440,7 @@ export default function App() {
     const perPerson = (newExp.amount / splitCount).toFixed(2);
 
     const notificationMsg = {
-      id: `chat-${Date.now()}`,
+      id: generateUUID(),
       trip_id: activeTrip.id,
       text: `💸 ${payerName} logged expense "${newExp.title}" (₹${Number(newExp.amount).toLocaleString()}). Split equal: ₹${perPerson} each for ${splitCount} people.`,
       is_system_event: true,
@@ -439,22 +450,23 @@ export default function App() {
     if (!store.chatMessages) store.chatMessages = [];
     store.chatMessages.push(notificationMsg);
 
-    // Save to Supabase DB as well
-    try {
-      await supabase.from('expenses').insert({
-        trip_id: activeTrip.id,
-        title: newExp.title,
-        amount: newExp.amount,
-        paid_by: newExp.paid_by,
-        category: newExp.category
-      });
-      await supabase.from('chat_messages').insert({
-        trip_id: activeTrip.id,
-        text: notificationMsg.text,
-        is_system_event: true
-      });
-    } catch (e) {
-      console.warn('Supabase expense insert notice:', e.message);
+    if (isValidUUID(activeTrip.id) && isValidUUID(newExp.paid_by)) {
+      try {
+        await supabase.from('expenses').insert({
+          trip_id: activeTrip.id,
+          title: newExp.title,
+          amount: newExp.amount,
+          paid_by: newExp.paid_by,
+          category: newExp.category
+        });
+        await supabase.from('chat_messages').insert({
+          trip_id: activeTrip.id,
+          text: notificationMsg.text,
+          is_system_event: true
+        });
+      } catch (e) {
+        console.warn('Supabase expense insert notice:', e.message);
+      }
     }
 
     saveLocalStore(store);
@@ -469,10 +481,12 @@ export default function App() {
     store.expenses = (store.expenses || []).filter(e => e.id !== expId);
     saveLocalStore(store);
 
-    try {
-      await supabase.from('expenses').delete().eq('id', expId);
-    } catch (e) {
-      console.warn('Supabase expense delete notice:', e.message);
+    if (isValidUUID(expId)) {
+      try {
+        await supabase.from('expenses').delete().eq('id', expId);
+      } catch (e) {
+        console.warn('Supabase expense delete notice:', e.message);
+      }
     }
 
     setExpenses(expenses.filter(e => e.id !== expId));
@@ -484,7 +498,7 @@ export default function App() {
 
     const store = getLocalStore();
     const newSettlement = {
-      id: `set-${Date.now()}`,
+      id: generateUUID(),
       trip_id: activeTrip.id,
       from_member_id: fromMemberId,
       to_member_id: toMemberId,
@@ -499,7 +513,7 @@ export default function App() {
     const toName = tripMembers.find(m => m.id === toMemberId)?.name || 'User';
 
     const setMsg = {
-      id: `chat-${Date.now()}`,
+      id: generateUUID(),
       trip_id: activeTrip.id,
       text: `✅ ${fromName} paid ₹${Number(amount).toLocaleString()} to ${toName} and settled up!`,
       is_system_event: true,
@@ -509,20 +523,22 @@ export default function App() {
     if (!store.chatMessages) store.chatMessages = [];
     store.chatMessages.push(setMsg);
 
-    try {
-      await supabase.from('settlements').insert({
-        trip_id: activeTrip.id,
-        from_member_id: fromMemberId,
-        to_member_id: toMemberId,
-        amount: Number(amount)
-      });
-      await supabase.from('chat_messages').insert({
-        trip_id: activeTrip.id,
-        text: setMsg.text,
-        is_system_event: true
-      });
-    } catch (e) {
-      console.warn('Supabase settlement insert notice:', e.message);
+    if (isValidUUID(activeTrip.id) && isValidUUID(fromMemberId) && isValidUUID(toMemberId)) {
+      try {
+        await supabase.from('settlements').insert({
+          trip_id: activeTrip.id,
+          from_member_id: fromMemberId,
+          to_member_id: toMemberId,
+          amount: Number(amount)
+        });
+        await supabase.from('chat_messages').insert({
+          trip_id: activeTrip.id,
+          text: setMsg.text,
+          is_system_event: true
+        });
+      } catch (e) {
+        console.warn('Supabase settlement insert notice:', e.message);
+      }
     }
 
     saveLocalStore(store);
@@ -537,7 +553,7 @@ export default function App() {
 
     const store = getLocalStore();
     const newMsg = {
-      id: `chat-${Date.now()}`,
+      id: generateUUID(),
       trip_id: activeTrip.id,
       ...msgObj,
       created_at: new Date().toISOString()
@@ -546,15 +562,17 @@ export default function App() {
     if (!store.chatMessages) store.chatMessages = [];
     store.chatMessages.push(newMsg);
 
-    try {
-      await supabase.from('chat_messages').insert({
-        trip_id: activeTrip.id,
-        sender_id: msgObj.sender_id,
-        text: msgObj.text,
-        is_system_event: false
-      });
-    } catch (e) {
-      console.warn('Supabase chat message insert notice:', e.message);
+    if (isValidUUID(activeTrip.id)) {
+      try {
+        await supabase.from('chat_messages').insert({
+          trip_id: activeTrip.id,
+          sender_id: isValidUUID(msgObj.sender_id) ? msgObj.sender_id : null,
+          text: msgObj.text,
+          is_system_event: false
+        });
+      } catch (e) {
+        console.warn('Supabase chat message insert notice:', e.message);
+      }
     }
 
     saveLocalStore(store);
@@ -726,7 +744,7 @@ export default function App() {
               if (!newFriendName.trim()) return;
               const store = getLocalStore();
               const newTM = {
-                id: `tm-${Date.now()}`,
+                id: generateUUID(),
                 trip_id: activeTrip.id,
                 name: newFriendName.trim(),
                 email: `${newFriendName.trim().toLowerCase().replace(/\s+/g, '')}@college.edu`,

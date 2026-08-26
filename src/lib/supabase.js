@@ -6,6 +6,22 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// UUID Validation and Generator Helpers
+export const isValidUUID = (str) => {
+  if (!str || typeof str !== 'string') return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+};
+
+export const generateUUID = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
 // Search Supabase profiles table for real registered users
 export const searchSupabaseProfiles = async (query) => {
   if (!query || query.trim().length < 2) return [];
@@ -27,6 +43,7 @@ export const searchSupabaseProfiles = async (query) => {
 
 // Sync profile updates to Supabase profiles table
 export const updateUserProfile = async (userId, profileData) => {
+  if (!isValidUUID(userId)) return { success: false, error: 'Invalid User UUID' };
   try {
     const { data, error } = await supabase
       .from('profiles')
@@ -58,6 +75,9 @@ export const updateUserProfile = async (userId, profileData) => {
 
 // REAL SUPABASE FRIENDSHIP DB FUNCTIONS
 export const sendSupabaseFriendRequest = async (requesterId, addresseeId) => {
+  if (!isValidUUID(requesterId) || !isValidUUID(addresseeId)) {
+    return { success: false, error: 'Invalid UUIDs' };
+  }
   try {
     const { data, error } = await supabase
       .from('friendships')
@@ -77,20 +97,19 @@ export const sendSupabaseFriendRequest = async (requesterId, addresseeId) => {
 };
 
 export const fetchSupabaseFriendships = async (userId) => {
-  if (!userId) return [];
+  if (!isValidUUID(userId)) return [];
   try {
     const { data, error } = await supabase
       .from('friendships')
       .select('*')
       .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
 
-    if (error) return [];
-    if (!data || data.length === 0) return [];
+    if (error || !data || data.length === 0) return [];
 
     const userIds = new Set();
     data.forEach(f => {
-      userIds.add(f.requester_id);
-      userIds.add(f.addressee_id);
+      if (isValidUUID(f.requester_id)) userIds.add(f.requester_id);
+      if (isValidUUID(f.addressee_id)) userIds.add(f.addressee_id);
     });
 
     const { data: profileList } = await supabase
@@ -121,6 +140,7 @@ export const fetchSupabaseFriendships = async (userId) => {
 };
 
 export const respondSupabaseFriendRequest = async (friendshipId, newStatus) => {
+  if (!isValidUUID(friendshipId)) return { success: false };
   try {
     if (newStatus === 'rejected') {
       const { error } = await supabase
@@ -145,12 +165,14 @@ export const respondSupabaseFriendRequest = async (friendshipId, newStatus) => {
 // REAL SUPABASE GROUPS & GROUP MEMBERS FUNCTIONS
 export const createSupabaseGroup = async ({ name, description, created_by, members }) => {
   try {
+    const validCreatorId = isValidUUID(created_by) ? created_by : null;
+
     const { data: groupData, error: groupErr } = await supabase
       .from('groups')
       .insert({
         name,
         description,
-        created_by
+        created_by: validCreatorId
       })
       .select()
       .single();
@@ -161,7 +183,7 @@ export const createSupabaseGroup = async ({ name, description, created_by, membe
 
     const memberRows = members.map(m => ({
       group_id,
-      user_id: m.user_id || m.id || null,
+      user_id: isValidUUID(m.user_id || m.id) ? (m.user_id || m.id) : null,
       display_name: m.display_name || m.name,
       email: m.email || '',
       avatar_color: m.avatar_color || '#4f46e5'
@@ -172,7 +194,7 @@ export const createSupabaseGroup = async ({ name, description, created_by, membe
       .insert(memberRows)
       .select();
 
-    if (memberErr) console.warn('Group members insert warning:', memberErr.message);
+    if (memberErr) console.warn('Group members insert notice:', memberErr.message);
 
     return { success: true, group: groupData, members: memberData || memberRows };
   } catch (err) {
@@ -183,20 +205,22 @@ export const createSupabaseGroup = async ({ name, description, created_by, membe
 
 export const fetchSupabaseUserGroups = async (userEmail, userId) => {
   try {
+    const validUserId = isValidUUID(userId) ? userId : null;
     let memberQuery = supabase.from('group_members').select('*');
-    if (userEmail && userId) {
-      memberQuery = memberQuery.or(`user_id.eq.${userId},email.ilike.${userEmail}`);
-    } else if (userId) {
-      memberQuery = memberQuery.eq('user_id', userId);
+
+    if (userEmail && validUserId) {
+      memberQuery = memberQuery.or(`user_id.eq.${validUserId},email.ilike.${userEmail}`);
+    } else if (validUserId) {
+      memberQuery = memberQuery.eq('user_id', validUserId);
     } else if (userEmail) {
       memberQuery = memberQuery.ilike('email', userEmail);
     }
 
     const { data: myMemberships, error: memErr } = await memberQuery;
-    if (memErr) return { groups: [], groupMembers: [] };
-    if (!myMemberships || myMemberships.length === 0) return { groups: [], groupMembers: [] };
+    if (memErr || !myMemberships || myMemberships.length === 0) return { groups: [], groupMembers: [] };
 
-    const groupIds = Array.from(new Set(myMemberships.map(m => m.group_id)));
+    const groupIds = Array.from(new Set(myMemberships.map(m => m.group_id))).filter(isValidUUID);
+    if (groupIds.length === 0) return { groups: [], groupMembers: [] };
 
     const { data: groupList, error: groupErr } = await supabase
       .from('groups')
@@ -222,6 +246,7 @@ export const fetchSupabaseUserGroups = async (userEmail, userId) => {
 };
 
 export const addSupabaseGroupMember = async (groupId, display_name, email, avatar_color = '#4f46e5') => {
+  if (!isValidUUID(groupId)) return { success: false };
   try {
     const { data, error } = await supabase
       .from('group_members')
@@ -244,7 +269,13 @@ export const addSupabaseGroupMember = async (groupId, display_name, email, avata
 
 // REAL SUPABASE TRIPS & TRIP MEMBERS FUNCTIONS
 export const createSupabaseTrip = async ({ group_id, title, description, code, created_by, selected_group_members }) => {
+  if (!isValidUUID(group_id)) {
+    console.error('Cannot create trip: group_id is not a valid UUID:', group_id);
+    return { success: false, error: 'Invalid Group UUID' };
+  }
   try {
+    const validCreatorId = isValidUUID(created_by) ? created_by : null;
+
     const { data: tripData, error: tripErr } = await supabase
       .from('trips')
       .insert({
@@ -253,7 +284,7 @@ export const createSupabaseTrip = async ({ group_id, title, description, code, c
         description,
         code,
         status: 'active',
-        created_by
+        created_by: validCreatorId
       })
       .select()
       .single();
@@ -262,10 +293,9 @@ export const createSupabaseTrip = async ({ group_id, title, description, code, c
 
     const trip_id = tripData.id;
 
-    // Create trip_members for all selected group members
     const memberRows = selected_group_members.map(gm => ({
       trip_id,
-      user_id: gm.user_id || null,
+      user_id: isValidUUID(gm.user_id) ? gm.user_id : null,
       name: gm.display_name || gm.name,
       email: gm.email || '',
       avatar_color: gm.avatar_color || '#4f46e5'
@@ -278,7 +308,6 @@ export const createSupabaseTrip = async ({ group_id, title, description, code, c
 
     if (tmErr) console.warn('Trip members insert notice:', tmErr.message);
 
-    // Initial system chat event
     await supabase.from('chat_messages').insert({
       trip_id,
       text: `🎉 Trip "${title}" was created!`,
@@ -294,7 +323,9 @@ export const createSupabaseTrip = async ({ group_id, title, description, code, c
 };
 
 export const fetchSupabaseGroupTrips = async (groupId) => {
-  if (!groupId) return { trips: [], tripMembers: [], expenses: [] };
+  if (!groupId || !isValidUUID(groupId)) {
+    return { trips: [], tripMembers: [], expenses: [] };
+  }
   try {
     const { data: tripList, error: tripErr } = await supabase
       .from('trips')
@@ -304,7 +335,7 @@ export const fetchSupabaseGroupTrips = async (groupId) => {
 
     if (tripErr || !tripList) return { trips: [], tripMembers: [], expenses: [] };
 
-    const tripIds = tripList.map(t => t.id);
+    const tripIds = tripList.map(t => t.id).filter(isValidUUID);
     if (tripIds.length === 0) return { trips: tripList, tripMembers: [], expenses: [] };
 
     const { data: tmList } = await supabase.from('trip_members').select('*').in('trip_id', tripIds);
@@ -322,7 +353,9 @@ export const fetchSupabaseGroupTrips = async (groupId) => {
 };
 
 export const fetchSupabaseTripWorkspace = async (tripId) => {
-  if (!tripId) return { tripMembers: [], expenses: [], settlements: [], chatMessages: [] };
+  if (!tripId || !isValidUUID(tripId)) {
+    return { tripMembers: [], expenses: [], settlements: [], chatMessages: [] };
+  }
   try {
     const { data: tmList } = await supabase.from('trip_members').select('*').eq('trip_id', tripId);
     const { data: expList } = await supabase.from('expenses').select('*').eq('trip_id', tripId).order('created_at', { ascending: false });
@@ -330,7 +363,6 @@ export const fetchSupabaseTripWorkspace = async (tripId) => {
     const { data: setList } = await supabase.from('settlements').select('*').eq('trip_id', tripId).order('created_at', { ascending: false });
     const { data: msgList } = await supabase.from('chat_messages').select('*').eq('trip_id', tripId).order('created_at', { ascending: true });
 
-    // Map splits into expenses
     const splitMap = {};
     (splitList || []).forEach(s => {
       if (!splitMap[s.expense_id]) splitMap[s.expense_id] = [];
@@ -368,14 +400,14 @@ export const EMPTY_INITIAL_DATA = {
 
 // Local storage state helpers
 export const getLocalStore = () => {
-  const data = localStorage.getItem('trip_split_trips_v8');
+  const data = localStorage.getItem('trip_split_v9_uuid');
   if (!data) {
-    localStorage.setItem('trip_split_trips_v8', JSON.stringify(EMPTY_INITIAL_DATA));
+    localStorage.setItem('trip_split_v9_uuid', JSON.stringify(EMPTY_INITIAL_DATA));
     return EMPTY_INITIAL_DATA;
   }
   return JSON.parse(data);
 };
 
 export const saveLocalStore = (data) => {
-  localStorage.setItem('trip_split_trips_v8', JSON.stringify(data));
+  localStorage.setItem('trip_split_v9_uuid', JSON.stringify(data));
 };
