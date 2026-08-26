@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Compass, Users, Copy, Check, Database, LogOut, ChevronDown, PlusCircle } from 'lucide-react';
+﻿import React, { useState } from 'react';
+import { Compass, Users, Copy, Check, LogOut, ChevronDown, PlusCircle, UserPlus } from 'lucide-react';
 
 export default function Navbar({
   activeTrip,
@@ -7,7 +7,7 @@ export default function Navbar({
   allMembers,
   onChangeCurrentUser,
   onOpenTripModal,
-  onOpenSqlModal,
+  onOpenAddFriendModal,
   onLogout
 }) {
   const [copiedCode, setCopiedCode] = useState(false);
@@ -60,12 +60,12 @@ export default function Navbar({
               TripSplit
             </h2>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
-              College Friends Trip
+              College Friends Expense Tracker
             </span>
           </div>
         </div>
 
-        {/* Active Trip Badge & Code */}
+        {/* Active Trip Badge & Invite Code */}
         {activeTrip && (
           <div style={{
             display: 'flex',
@@ -113,15 +113,17 @@ export default function Navbar({
 
         {/* Controls & Profile */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          {/* SQL Modal Trigger Button */}
-          <button
-            onClick={onOpenSqlModal}
-            className="btn btn-secondary btn-sm"
-            style={{ fontSize: '0.8rem' }}
-            title="View Supabase SQL Script"
-          >
-            <Database size={14} color="var(--primary)" /> SQL Script
-          </button>
+          {/* Add Friend Button */}
+          {activeTrip && (
+            <button
+              onClick={onOpenAddFriendModal}
+              className="btn btn-secondary btn-sm"
+              style={{ fontSize: '0.8rem' }}
+              title="Add a friend to this trip"
+            >
+              <UserPlus size={14} color="var(--primary)" /> Add Friend
+            </button>
+          )}
 
           {/* Member Switcher Dropdown */}
           {currentUser && (
@@ -218,7 +220,7 @@ export default function Navbar({
                       fontWeight: 600
                     }}
                   >
-                    <LogOut size={14} /> Sign Out / Exit
+                    <LogOut size={14} /> Sign Out
                   </button>
                 </div>
               )}

@@ -5,10 +5,10 @@ import PersonalPortal from './components/PersonalPortal';
 import ExpenseList from './components/ExpenseList';
 import AddExpenseModal from './components/AddExpenseModal';
 import SettlementView from './components/SettlementView';
+import TripChat from './components/TripChat';
 import TripSelector from './components/TripSelector';
-import SqlScriptModal from './components/SqlScriptModal';
 import { supabase, getLocalStore, saveLocalStore } from './lib/supabase';
-import { User, Receipt, Zap, Compass, UserPlus, ArrowRight } from 'lucide-react';
+import { User, Receipt, Zap, MessageSquare, Compass, UserPlus, ArrowRight } from 'lucide-react';
 import './App.css';
 
 export default function App() {
@@ -19,12 +19,12 @@ export default function App() {
   const [currentMember, setCurrentMember] = useState(null);
   const [expenses, setExpenses] = useState([]);
   const [settlements, setSettlements] = useState([]);
+  const [chatMessages, setChatMessages] = useState([]);
 
   // UI state
-  const [activeTab, setActiveTab] = useState('portal'); // 'portal' | 'expenses' | 'settlement'
+  const [activeTab, setActiveTab] = useState('portal'); // 'portal' | 'expenses' | 'chat' | 'settlement'
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
   const [isTripSelectorOpen, setIsTripSelectorOpen] = useState(false);
-  const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
 
   // New trip creation state for onboarding
   const [onboardTripName, setOnboardTripName] = useState('');
@@ -67,10 +67,12 @@ export default function App() {
     const members = (store.members || []).filter(m => m.trip_id === tripId);
     const exps = (store.expenses || []).filter(e => e.trip_id === tripId);
     const sets = (store.settlements || []).filter(s => s.trip_id === tripId);
+    const msgs = (store.chatMessages || []).filter(c => c.trip_id === tripId);
 
     setTripMembers(members);
     setExpenses(exps);
     setSettlements(sets);
+    setChatMessages(msgs);
 
     if (members.length > 0) {
       setCurrentMember(members[0]);
@@ -127,6 +129,17 @@ export default function App() {
       });
     }
 
+    // Initial system chat event
+    const initMsg = {
+      id: `chat-${Date.now()}`,
+      trip_id: newTrip.id,
+      text: `🎉 Trip "${newTrip.title}" was created by ${myName}! Share code ${newTrip.code} to invite friends.`,
+      is_system_event: true,
+      created_at: new Date().toISOString()
+    };
+    if (!store.chatMessages) store.chatMessages = [];
+    store.chatMessages.push(initMsg);
+
     saveLocalStore(store);
 
     setTrips([newTrip, ...trips]);
@@ -150,9 +163,22 @@ export default function App() {
     };
 
     store.members.push(newMember);
+
+    // System chat notification
+    const systemMsg = {
+      id: `chat-${Date.now()}`,
+      trip_id: activeTrip.id,
+      text: `👋 ${newFriendName.trim()} was added to the trip!`,
+      is_system_event: true,
+      created_at: new Date().toISOString()
+    };
+    if (!store.chatMessages) store.chatMessages = [];
+    store.chatMessages.push(systemMsg);
+
     saveLocalStore(store);
 
     setTripMembers([...tripMembers, newMember]);
+    setChatMessages([...chatMessages, systemMsg]);
     setNewFriendName('');
     setShowAddFriendModal(false);
   };
@@ -170,9 +196,27 @@ export default function App() {
     };
 
     store.expenses.unshift(created);
+
+    // Post System Chat Notification to notify everyone!
+    const payerName = tripMembers.find(m => m.id === newExp.paid_by)?.name || 'Someone';
+    const splitCount = newExp.splits?.length || 1;
+    const perPerson = (newExp.amount / splitCount).toFixed(2);
+    
+    const notificationMsg = {
+      id: `chat-${Date.now()}`,
+      trip_id: activeTrip.id,
+      text: `💸 ${payerName} logged expense "${newExp.title}" (₹${Number(newExp.amount).toLocaleString()}). Split equal: ₹${perPerson} each for ${splitCount} people.`,
+      is_system_event: true,
+      created_at: new Date().toISOString()
+    };
+
+    if (!store.chatMessages) store.chatMessages = [];
+    store.chatMessages.push(notificationMsg);
+
     saveLocalStore(store);
 
     setExpenses([created, ...expenses]);
+    setChatMessages([...chatMessages, notificationMsg]);
   };
 
   // Delete Expense Handler
@@ -199,9 +243,45 @@ export default function App() {
     };
 
     store.settlements.unshift(newSettlement);
+
+    // Post settlement notification in chat
+    const fromName = tripMembers.find(m => m.id === fromMemberId)?.name || 'User';
+    const toName = tripMembers.find(m => m.id === toMemberId)?.name || 'User';
+
+    const setMsg = {
+      id: `chat-${Date.now()}`,
+      trip_id: activeTrip.id,
+      text: `✅ ${fromName} paid ₹${Number(amount).toLocaleString()} to ${toName} and settled up!`,
+      is_system_event: true,
+      created_at: new Date().toISOString()
+    };
+
+    if (!store.chatMessages) store.chatMessages = [];
+    store.chatMessages.push(setMsg);
+
     saveLocalStore(store);
 
     setSettlements([newSettlement, ...settlements]);
+    setChatMessages([...chatMessages, setMsg]);
+  };
+
+  // Send Group Chat Message
+  const handleSendMessage = (msgObj) => {
+    if (!activeTrip) return;
+
+    const store = getLocalStore();
+    const newMsg = {
+      id: `chat-${Date.now()}`,
+      trip_id: activeTrip.id,
+      ...msgObj,
+      created_at: new Date().toISOString()
+    };
+
+    if (!store.chatMessages) store.chatMessages = [];
+    store.chatMessages.push(newMsg);
+    saveLocalStore(store);
+
+    setChatMessages([...chatMessages, newMsg]);
   };
 
   // Create Trip Handler
@@ -234,6 +314,7 @@ export default function App() {
     setCurrentMember(defaultMember);
     setExpenses([]);
     setSettlements([]);
+    setChatMessages([]);
   };
 
   // Join Trip Handler
@@ -286,7 +367,7 @@ export default function App() {
           allMembers={[]}
           onChangeCurrentUser={() => {}}
           onOpenTripModal={() => setIsTripSelectorOpen(true)}
-          onOpenSqlModal={() => setIsSqlModalOpen(true)}
+          onOpenAddFriendModal={() => setShowAddFriendModal(true)}
           onLogout={handleLogout}
         />
         <main className="main-content" style={{ maxWidth: '520px', paddingTop: '3rem' }}>
@@ -354,7 +435,6 @@ export default function App() {
             </form>
           </div>
         </main>
-        <SqlScriptModal isOpen={isSqlModalOpen} onClose={() => setIsSqlModalOpen(false)} />
       </div>
     );
   }
@@ -368,7 +448,7 @@ export default function App() {
         allMembers={tripMembers}
         onChangeCurrentUser={(m) => setCurrentMember(m)}
         onOpenTripModal={() => setIsTripSelectorOpen(true)}
-        onOpenSqlModal={() => setIsSqlModalOpen(true)}
+        onOpenAddFriendModal={() => setShowAddFriendModal(true)}
         onLogout={handleLogout}
       />
 
@@ -383,7 +463,7 @@ export default function App() {
           gap: '0.75rem',
           marginBottom: '1.75rem'
         }}>
-          <div className="tab-navigation" style={{ marginBottom: 0, flex: 1, maxWidth: '550px' }}>
+          <div className="tab-navigation" style={{ marginBottom: 0, flex: 1, maxWidth: '680px' }}>
             <button
               className={`tab-btn ${activeTab === 'portal' ? 'active' : ''}`}
               onClick={() => setActiveTab('portal')}
@@ -395,6 +475,12 @@ export default function App() {
               onClick={() => setActiveTab('expenses')}
             >
               <Receipt size={16} /> Expenses ({expenses.length})
+            </button>
+            <button
+              className={`tab-btn ${activeTab === 'chat' ? 'active' : ''}`}
+              onClick={() => setActiveTab('chat')}
+            >
+              <MessageSquare size={16} /> Group Chat ({chatMessages.length})
             </button>
             <button
               className={`tab-btn ${activeTab === 'settlement' ? 'active' : ''}`}
@@ -431,6 +517,15 @@ export default function App() {
             currentUser={currentMember}
             onOpenAddModal={() => setIsAddExpenseOpen(true)}
             onDeleteExpense={handleDeleteExpense}
+          />
+        )}
+
+        {activeTab === 'chat' && (
+          <TripChat
+            messages={chatMessages}
+            tripMembers={tripMembers}
+            currentUser={currentMember}
+            onSendMessage={handleSendMessage}
           />
         )}
 
@@ -488,11 +583,6 @@ export default function App() {
         onSelectTrip={handleSelectTrip}
         onCreateTrip={handleCreateTrip}
         onJoinTrip={handleJoinTrip}
-      />
-
-      <SqlScriptModal
-        isOpen={isSqlModalOpen}
-        onClose={() => setIsSqlModalOpen(false)}
       />
     </div>
   );
