@@ -1,19 +1,25 @@
 ﻿import React, { useState, useEffect } from 'react';
 import Navbar from './components/Navbar';
 import Auth from './components/Auth';
+import GroupList from './components/GroupList';
+import GroupDetail from './components/GroupDetail';
 import PersonalPortal from './components/PersonalPortal';
 import ExpenseList from './components/ExpenseList';
 import AddExpenseModal from './components/AddExpenseModal';
 import SettlementView from './components/SettlementView';
 import TripChat from './components/TripChat';
-import TripSelector from './components/TripSelector';
 import { supabase, getLocalStore, saveLocalStore } from './lib/supabase';
-import { User, Receipt, Zap, MessageSquare, Compass, UserPlus, ArrowRight } from 'lucide-react';
+import { User, Receipt, Zap, MessageSquare, ArrowLeft, UserPlus } from 'lucide-react';
 import './App.css';
 
 export default function App() {
   const [sessionUser, setSessionUser] = useState(null);
+
+  // Hierarchy Data
+  const [groups, setGroups] = useState([]);
+  const [groupMembers, setGroupMembers] = useState([]);
   const [trips, setTrips] = useState([]);
+  const [activeGroup, setActiveGroup] = useState(null);
   const [activeTrip, setActiveTrip] = useState(null);
   const [tripMembers, setTripMembers] = useState([]);
   const [currentMember, setCurrentMember] = useState(null);
@@ -21,17 +27,14 @@ export default function App() {
   const [settlements, setSettlements] = useState([]);
   const [chatMessages, setChatMessages] = useState([]);
 
-  // UI state
-  const [activeTab, setActiveTab] = useState('portal'); // 'portal' | 'expenses' | 'chat' | 'settlement'
-  const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
-  const [isTripSelectorOpen, setIsTripSelectorOpen] = useState(false);
+  // Navigation Level: 'groups' | 'group_detail' | 'trip_detail'
+  const [viewMode, setViewMode] = useState('groups');
+  const [tripTab, setTripTab] = useState('portal'); // 'portal' | 'expenses' | 'chat' | 'settlement'
 
-  // New trip creation state for onboarding
-  const [onboardTripName, setOnboardTripName] = useState('');
-  const [onboardUserName, setOnboardUserName] = useState('');
-  const [onboardFriends, setOnboardFriends] = useState('');
-  const [newFriendName, setNewFriendName] = useState('');
+  // Modals
+  const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
   const [showAddFriendModal, setShowAddFriendModal] = useState(false);
+  const [newFriendName, setNewFriendName] = useState('');
 
   // Initialize data on mount
   useEffect(() => {
@@ -55,19 +58,32 @@ export default function App() {
 
   const loadData = () => {
     const store = getLocalStore();
+    setGroups(store.groups || []);
+    setGroupMembers(store.groupMembers || []);
     setTrips(store.trips || []);
-    if (store.trips?.length > 0 && !activeTrip) {
-      const defaultTrip = store.trips[0];
-      setActiveTrip(defaultTrip);
-      loadTripDetails(defaultTrip.id, store);
-    }
   };
 
-  const loadTripDetails = (tripId, store = getLocalStore()) => {
-    const members = (store.members || []).filter(m => m.trip_id === tripId);
-    const exps = (store.expenses || []).filter(e => e.trip_id === tripId);
-    const sets = (store.settlements || []).filter(s => s.trip_id === tripId);
-    const msgs = (store.chatMessages || []).filter(c => c.trip_id === tripId);
+  // Open Group Detail
+  const handleSelectGroup = (group) => {
+    const store = getLocalStore();
+    setActiveGroup(group);
+    setViewMode('group_detail');
+  };
+
+  // Open Trip Detail Workspace
+  const handleSelectTrip = (trip) => {
+    const store = getLocalStore();
+    setActiveTrip(trip);
+
+    // Find group for this trip
+    const parentGroup = (store.groups || []).find(g => g.id === trip.group_id);
+    if (parentGroup) setActiveGroup(parentGroup);
+
+    // Load trip members, expenses, settlements, chat
+    const members = (store.tripMembers || []).filter(m => m.trip_id === trip.id);
+    const exps = (store.expenses || []).filter(e => e.trip_id === trip.id);
+    const sets = (store.settlements || []).filter(s => s.trip_id === trip.id);
+    const msgs = (store.chatMessages || []).filter(c => c.trip_id === trip.id);
 
     setTripMembers(members);
     setExpenses(exps);
@@ -76,64 +92,144 @@ export default function App() {
 
     if (members.length > 0) {
       setCurrentMember(members[0]);
+    } else {
+      // Auto add user as trip member if empty
+      const myMember = {
+        id: `tm-${Date.now()}`,
+        trip_id: trip.id,
+        name: sessionUser?.user_metadata?.full_name || 'Me',
+        email: sessionUser?.email || 'me@college.edu',
+        avatar_color: '#4f46e5'
+      };
+      if (!store.tripMembers) store.tripMembers = [];
+      store.tripMembers.push(myMember);
+      saveLocalStore(store);
+      setTripMembers([myMember]);
+      setCurrentMember(myMember);
     }
+
+    setViewMode('trip_detail');
   };
 
-  // Switch Active Trip
-  const handleSelectTrip = (trip) => {
-    setActiveTrip(trip);
-    loadTripDetails(trip.id);
-  };
-
-  // Create First Trip Onboarding Form
-  const handleCreateFirstTrip = (e) => {
-    e.preventDefault();
-    if (!onboardTripName.trim()) return;
-
+  // Create Group Handler
+  const handleCreateGroup = ({ name, description, members }) => {
     const store = getLocalStore();
-    const code = `TRIP${Math.floor(1000 + Math.random() * 9000)}`;
-    const newTrip = {
-      id: `trip-${Date.now()}`,
-      title: onboardTripName.trim(),
-      description: 'College Friends Trip',
-      code,
+    const newGroup = {
+      id: `group-${Date.now()}`,
+      name,
+      description,
+      created_by: sessionUser?.id,
       created_at: new Date().toISOString()
     };
 
-    store.trips.unshift(newTrip);
+    if (!store.groups) store.groups = [];
+    store.groups.unshift(newGroup);
 
-    // Add user member
-    const myName = onboardUserName.trim() || sessionUser?.user_metadata?.full_name || 'Me';
+    // Add user as group member
     const colorList = ['#4f46e5', '#059669', '#d97706', '#e11d48', '#0284c7', '#7c3aed'];
-    
-    const userMember = {
-      id: `m-${Date.now()}-0`,
-      trip_id: newTrip.id,
-      name: myName,
+    const myName = sessionUser?.user_metadata?.full_name || 'Me';
+    const myGroupMember = {
+      id: `gm-${Date.now()}-0`,
+      group_id: newGroup.id,
+      display_name: myName,
       email: sessionUser?.email || 'me@college.edu',
       avatar_color: colorList[0]
     };
-    store.members.push(userMember);
 
-    // Parse friend names
-    if (onboardFriends.trim()) {
-      const friends = onboardFriends.split(',').map(f => f.trim()).filter(Boolean);
-      friends.forEach((fName, idx) => {
-        store.members.push({
-          id: `m-${Date.now()}-${idx + 1}`,
-          trip_id: newTrip.id,
-          name: fName,
-          email: `${fName.toLowerCase().replace(/\s+/g, '')}@college.edu`,
-          avatar_color: colorList[(idx + 1) % colorList.length]
-        });
+    if (!store.groupMembers) store.groupMembers = [];
+    store.groupMembers.push(myGroupMember);
+
+    // Add initial friends to group
+    members.forEach((mName, idx) => {
+      store.groupMembers.push({
+        id: `gm-${Date.now()}-${idx + 1}`,
+        group_id: newGroup.id,
+        display_name: mName,
+        email: `${mName.toLowerCase().replace(/\s+/g, '')}@college.edu`,
+        avatar_color: colorList[(idx + 1) % colorList.length]
       });
+    });
+
+    saveLocalStore(store);
+
+    setGroups([newGroup, ...groups]);
+    setGroupMembers(store.groupMembers);
+    setActiveGroup(newGroup);
+    setViewMode('group_detail');
+  };
+
+  // Search & Add Friend Handler
+  const handleSearchAndAddFriend = (friendName) => {
+    const store = getLocalStore();
+    if (activeGroup) {
+      const colorList = ['#4f46e5', '#059669', '#d97706', '#e11d48', '#0284c7', '#7c3aed'];
+      const newGM = {
+        id: `gm-${Date.now()}`,
+        group_id: activeGroup.id,
+        display_name: friendName,
+        email: `${friendName.toLowerCase().replace(/\s+/g, '')}@college.edu`,
+        avatar_color: colorList[(store.groupMembers?.length || 0) % colorList.length]
+      };
+      if (!store.groupMembers) store.groupMembers = [];
+      store.groupMembers.push(newGM);
+      saveLocalStore(store);
+      setGroupMembers([...store.groupMembers]);
     }
+  };
+
+  // Add Member to specific Group
+  const handleAddMemberToGroup = (groupId, memberName) => {
+    const store = getLocalStore();
+    const colorList = ['#4f46e5', '#059669', '#d97706', '#e11d48', '#0284c7', '#7c3aed'];
+    const newGM = {
+      id: `gm-${Date.now()}`,
+      group_id: groupId,
+      display_name: memberName,
+      email: `${memberName.toLowerCase().replace(/\s+/g, '')}@college.edu`,
+      avatar_color: colorList[(store.groupMembers?.length || 0) % colorList.length]
+    };
+    if (!store.groupMembers) store.groupMembers = [];
+    store.groupMembers.push(newGM);
+    saveLocalStore(store);
+    setGroupMembers([...store.groupMembers]);
+  };
+
+  // Create Trip inside Group Handler
+  const handleCreateTripInGroup = ({ group_id, title, description, code, selected_member_ids }) => {
+    const store = getLocalStore();
+    const newTrip = {
+      id: `trip-${Date.now()}`,
+      group_id,
+      title,
+      description,
+      code,
+      status: 'active',
+      created_by: sessionUser?.id,
+      created_at: new Date().toISOString()
+    };
+
+    if (!store.trips) store.trips = [];
+    store.trips.unshift(newTrip);
+
+    // Map selected group members into trip members
+    const activeGMs = (store.groupMembers || []).filter(gm => gm.group_id === group_id && selected_member_ids.includes(gm.id));
+    if (!store.tripMembers) store.tripMembers = [];
+
+    activeGMs.forEach(gm => {
+      store.tripMembers.push({
+        id: `tm-${Date.now()}-${gm.id}`,
+        trip_id: newTrip.id,
+        name: gm.display_name,
+        email: gm.email,
+        avatar_color: gm.avatar_color
+      });
+    });
 
     // Initial system chat event
     const initMsg = {
       id: `chat-${Date.now()}`,
       trip_id: newTrip.id,
-      text: `🎉 Trip "${newTrip.title}" was created by ${myName}! Share code ${newTrip.code} to invite friends.`,
+      text: `🎉 Trip "${newTrip.title}" was created in group!`,
       is_system_event: true,
       created_at: new Date().toISOString()
     };
@@ -143,47 +239,10 @@ export default function App() {
     saveLocalStore(store);
 
     setTrips([newTrip, ...trips]);
-    setActiveTrip(newTrip);
-    loadTripDetails(newTrip.id, store);
+    handleSelectTrip(newTrip);
   };
 
-  // Add friend to active trip
-  const handleAddFriend = (e) => {
-    e.preventDefault();
-    if (!newFriendName.trim() || !activeTrip) return;
-
-    const store = getLocalStore();
-    const colorList = ['#4f46e5', '#059669', '#d97706', '#e11d48', '#0284c7', '#7c3aed'];
-    const newMember = {
-      id: `m-${Date.now()}`,
-      trip_id: activeTrip.id,
-      name: newFriendName.trim(),
-      email: `${newFriendName.trim().toLowerCase().replace(/\s+/g, '')}@college.edu`,
-      avatar_color: colorList[tripMembers.length % colorList.length]
-    };
-
-    store.members.push(newMember);
-
-    // System chat notification
-    const systemMsg = {
-      id: `chat-${Date.now()}`,
-      trip_id: activeTrip.id,
-      text: `👋 ${newFriendName.trim()} was added to the trip!`,
-      is_system_event: true,
-      created_at: new Date().toISOString()
-    };
-    if (!store.chatMessages) store.chatMessages = [];
-    store.chatMessages.push(systemMsg);
-
-    saveLocalStore(store);
-
-    setTripMembers([...tripMembers, newMember]);
-    setChatMessages([...chatMessages, systemMsg]);
-    setNewFriendName('');
-    setShowAddFriendModal(false);
-  };
-
-  // Add Expense Handler
+  // Add Expense Handler (With Title for what they spent)
   const handleAddExpense = (newExp) => {
     if (!activeTrip) return;
 
@@ -195,13 +254,14 @@ export default function App() {
       created_at: new Date().toISOString()
     };
 
+    if (!store.expenses) store.expenses = [];
     store.expenses.unshift(created);
 
-    // Post System Chat Notification to notify everyone!
+    // Post Chat Notification
     const payerName = tripMembers.find(m => m.id === newExp.paid_by)?.name || 'Someone';
     const splitCount = newExp.splits?.length || 1;
     const perPerson = (newExp.amount / splitCount).toFixed(2);
-    
+
     const notificationMsg = {
       id: `chat-${Date.now()}`,
       trip_id: activeTrip.id,
@@ -222,7 +282,7 @@ export default function App() {
   // Delete Expense Handler
   const handleDeleteExpense = (expId) => {
     const store = getLocalStore();
-    store.expenses = store.expenses.filter(e => e.id !== expId);
+    store.expenses = (store.expenses || []).filter(e => e.id !== expId);
     saveLocalStore(store);
 
     setExpenses(expenses.filter(e => e.id !== expId));
@@ -242,6 +302,7 @@ export default function App() {
       created_at: new Date().toISOString()
     };
 
+    if (!store.settlements) store.settlements = [];
     store.settlements.unshift(newSettlement);
 
     // Post settlement notification in chat
@@ -284,69 +345,11 @@ export default function App() {
     setChatMessages([...chatMessages, newMsg]);
   };
 
-  // Create Trip Handler
-  const handleCreateTrip = ({ title, description, code }) => {
-    const store = getLocalStore();
-    const newTrip = {
-      id: `trip-${Date.now()}`,
-      title,
-      description,
-      code,
-      created_at: new Date().toISOString()
-    };
-
-    store.trips.unshift(newTrip);
-
-    const defaultMember = {
-      id: `m-${Date.now()}`,
-      trip_id: newTrip.id,
-      name: currentMember ? currentMember.name : (sessionUser?.user_metadata?.full_name || 'Me'),
-      email: sessionUser?.email || 'me@college.edu',
-      avatar_color: '#4f46e5'
-    };
-
-    store.members.push(defaultMember);
-    saveLocalStore(store);
-
-    setTrips([newTrip, ...trips]);
-    setActiveTrip(newTrip);
-    setTripMembers([defaultMember]);
-    setCurrentMember(defaultMember);
-    setExpenses([]);
-    setSettlements([]);
-    setChatMessages([]);
-  };
-
-  // Join Trip Handler
-  const handleJoinTrip = (code) => {
-    const store = getLocalStore();
-    const foundTrip = store.trips.find(t => t.code.toUpperCase() === code.toUpperCase());
-
-    if (foundTrip) {
-      const existingMember = store.members.find(m => m.trip_id === foundTrip.id && m.email === sessionUser?.email);
-      if (!existingMember) {
-        const newMember = {
-          id: `m-${Date.now()}`,
-          trip_id: foundTrip.id,
-          name: sessionUser?.user_metadata?.full_name || 'College Friend',
-          email: sessionUser?.email || 'friend@college.edu',
-          avatar_color: '#059669'
-        };
-        store.members.push(newMember);
-        saveLocalStore(store);
-      }
-
-      setActiveTrip(foundTrip);
-      loadTripDetails(foundTrip.id, store);
-      return true;
-    }
-    return false;
-  };
-
   // Handle Logout
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setSessionUser(null);
+    setViewMode('groups');
   };
 
   if (!sessionUser) {
@@ -357,194 +360,161 @@ export default function App() {
     );
   }
 
-  // If no trips exist yet, render clean onboarding UI
-  if (!activeTrip || trips.length === 0) {
-    return (
-      <div className="app-container">
-        <Navbar
-          activeTrip={null}
-          currentUser={null}
-          allMembers={[]}
-          onChangeCurrentUser={() => {}}
-          onOpenTripModal={() => setIsTripSelectorOpen(true)}
-          onOpenAddFriendModal={() => setShowAddFriendModal(true)}
-          onLogout={handleLogout}
-        />
-        <main className="main-content" style={{ maxWidth: '520px', paddingTop: '3rem' }}>
-          <div className="glass-card animate-fade-in" style={{ padding: '2rem' }}>
-            <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-              <div style={{
-                width: '50px',
-                height: '50px',
-                borderRadius: '14px',
-                background: 'var(--primary-light)',
-                color: 'var(--primary)',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '0.75rem'
-              }}>
-                <Compass size={28} />
-              </div>
-              <h2 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Create Your First Trip</h2>
-              <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-                Start tracking shared expenses with your college friends!
-              </p>
-            </div>
-
-            <form onSubmit={handleCreateFirstTrip}>
-              <div className="form-group">
-                <label className="form-label">Trip Name</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="e.g. Goa Trip 2026"
-                  value={onboardTripName}
-                  onChange={e => setOnboardTripName(e.target.value)}
-                  required
-                  autoFocus
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Your Display Name</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="e.g. Rahul"
-                  value={onboardUserName}
-                  onChange={e => setOnboardUserName(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Friends Going on Trip (Comma Separated)</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="e.g. Priya, Rohan, Ananya"
-                  value={onboardFriends}
-                  onChange={e => setOnboardFriends(e.target.value)}
-                />
-              </div>
-
-              <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '0.8rem', marginTop: '0.5rem' }}>
-                Start Trip & Split Expenses <ArrowRight size={16} />
-              </button>
-            </form>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
   return (
     <div className="app-container">
-      {/* Top Navbar */}
+      {/* Top Navbar with Breadcrumb Navigation */}
       <Navbar
-        activeTrip={activeTrip}
+        activeGroup={activeGroup}
+        activeTrip={viewMode === 'trip_detail' ? activeTrip : null}
         currentUser={currentMember}
         allMembers={tripMembers}
         onChangeCurrentUser={(m) => setCurrentMember(m)}
-        onOpenTripModal={() => setIsTripSelectorOpen(true)}
-        onOpenAddFriendModal={() => setShowAddFriendModal(true)}
+        onGoToGroups={() => { setViewMode('groups'); setActiveTrip(null); }}
+        onGoToGroupDetail={() => { setViewMode('group_detail'); setActiveTrip(null); }}
         onLogout={handleLogout}
       />
 
       {/* Main Workspace */}
       <main className="main-content">
-        {/* Navigation Tabs & Member Add Bar */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '0.75rem',
-          marginBottom: '1.75rem'
-        }}>
-          <div className="tab-navigation" style={{ marginBottom: 0, flex: 1, maxWidth: '680px' }}>
-            <button
-              className={`tab-btn ${activeTab === 'portal' ? 'active' : ''}`}
-              onClick={() => setActiveTab('portal')}
-            >
-              <User size={16} /> My Portal
-            </button>
-            <button
-              className={`tab-btn ${activeTab === 'expenses' ? 'active' : ''}`}
-              onClick={() => setActiveTab('expenses')}
-            >
-              <Receipt size={16} /> Expenses ({expenses.length})
-            </button>
-            <button
-              className={`tab-btn ${activeTab === 'chat' ? 'active' : ''}`}
-              onClick={() => setActiveTab('chat')}
-            >
-              <MessageSquare size={16} /> Group Chat ({chatMessages.length})
-            </button>
-            <button
-              className={`tab-btn ${activeTab === 'settlement' ? 'active' : ''}`}
-              onClick={() => setActiveTab('settlement')}
-            >
-              <Zap size={16} /> Settlements
-            </button>
+        {/* LEVEL 1: GROUPS LIST */}
+        {viewMode === 'groups' && (
+          <GroupList
+            groups={groups}
+            allGroupMembers={groupMembers}
+            allTrips={trips}
+            onSelectGroup={handleSelectGroup}
+            onCreateGroup={handleCreateGroup}
+            onSearchAndAddFriend={handleSearchAndAddFriend}
+          />
+        )}
+
+        {/* LEVEL 2: GROUP DETAIL & TRIPS HISTORY */}
+        {viewMode === 'group_detail' && activeGroup && (
+          <GroupDetail
+            group={activeGroup}
+            groupMembers={groupMembers.filter(m => m.group_id === activeGroup.id)}
+            trips={trips.filter(t => t.group_id === activeGroup.id)}
+            allExpenses={expenses}
+            onBackToGroups={() => setViewMode('groups')}
+            onSelectTrip={handleSelectTrip}
+            onCreateTripInGroup={handleCreateTripInGroup}
+            onAddMemberToGroup={handleAddMemberToGroup}
+          />
+        )}
+
+        {/* LEVEL 3: TRIP WORKSPACE DASHBOARD */}
+        {viewMode === 'trip_detail' && activeTrip && (
+          <div>
+            {/* Back to Group Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setViewMode('group_detail')}
+              >
+                <ArrowLeft size={14} /> Back to {activeGroup?.name || 'Group'}
+              </button>
+
+              <button
+                onClick={() => setShowAddFriendModal(true)}
+                className="btn btn-secondary btn-sm"
+              >
+                <UserPlus size={14} /> Add Friend to Trip ({tripMembers.length})
+              </button>
+            </div>
+
+            {/* Navigation Tabs */}
+            <div className="tab-navigation" style={{ maxWidth: '680px', margin: '0 auto 1.75rem auto' }}>
+              <button
+                className={`tab-btn ${tripTab === 'portal' ? 'active' : ''}`}
+                onClick={() => setTripTab('portal')}
+              >
+                <User size={16} /> My Portal
+              </button>
+              <button
+                className={`tab-btn ${tripTab === 'expenses' ? 'active' : ''}`}
+                onClick={() => setTripTab('expenses')}
+              >
+                <Receipt size={16} /> Expenses ({expenses.length})
+              </button>
+              <button
+                className={`tab-btn ${tripTab === 'chat' ? 'active' : ''}`}
+                onClick={() => setTripTab('chat')}
+              >
+                <MessageSquare size={16} /> Trip Chat ({chatMessages.length})
+              </button>
+              <button
+                className={`tab-btn ${tripTab === 'settlement' ? 'active' : ''}`}
+                onClick={() => setTripTab('settlement')}
+              >
+                <Zap size={16} /> Settlements
+              </button>
+            </div>
+
+            {/* Tab Views */}
+            {tripTab === 'portal' && (
+              <PersonalPortal
+                currentUser={currentMember}
+                tripMembers={tripMembers}
+                expenses={expenses}
+                settlements={settlements}
+                onSettleUp={handleSettleUp}
+              />
+            )}
+
+            {tripTab === 'expenses' && (
+              <ExpenseList
+                expenses={expenses}
+                tripMembers={tripMembers}
+                currentUser={currentMember}
+                onOpenAddModal={() => setIsAddExpenseOpen(true)}
+                onDeleteExpense={handleDeleteExpense}
+              />
+            )}
+
+            {tripTab === 'chat' && (
+              <TripChat
+                messages={chatMessages}
+                tripMembers={tripMembers}
+                currentUser={currentMember}
+                onSendMessage={handleSendMessage}
+              />
+            )}
+
+            {tripTab === 'settlement' && (
+              <SettlementView
+                tripMembers={tripMembers}
+                expenses={expenses}
+                settlements={settlements}
+                onSettleUp={handleSettleUp}
+              />
+            )}
           </div>
-
-          <button
-            onClick={() => setShowAddFriendModal(true)}
-            className="btn btn-secondary btn-sm"
-            title="Add another friend to this trip"
-          >
-            <UserPlus size={14} /> Add Friend ({tripMembers.length})
-          </button>
-        </div>
-
-        {/* Tab Views */}
-        {activeTab === 'portal' && (
-          <PersonalPortal
-            currentUser={currentMember}
-            tripMembers={tripMembers}
-            expenses={expenses}
-            settlements={settlements}
-            onSettleUp={handleSettleUp}
-          />
-        )}
-
-        {activeTab === 'expenses' && (
-          <ExpenseList
-            expenses={expenses}
-            tripMembers={tripMembers}
-            currentUser={currentMember}
-            onOpenAddModal={() => setIsAddExpenseOpen(true)}
-            onDeleteExpense={handleDeleteExpense}
-          />
-        )}
-
-        {activeTab === 'chat' && (
-          <TripChat
-            messages={chatMessages}
-            tripMembers={tripMembers}
-            currentUser={currentMember}
-            onSendMessage={handleSendMessage}
-          />
-        )}
-
-        {activeTab === 'settlement' && (
-          <SettlementView
-            tripMembers={tripMembers}
-            expenses={expenses}
-            settlements={settlements}
-            onSettleUp={handleSettleUp}
-          />
         )}
       </main>
 
-      {/* Add Friend Modal */}
-      {showAddFriendModal && (
+      {/* Add Friend to Trip Modal */}
+      {showAddFriendModal && activeTrip && (
         <div className="modal-overlay" onClick={() => setShowAddFriendModal(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px', padding: '1.5rem' }}>
             <h3 style={{ fontSize: '1.15rem', fontWeight: 800, marginBottom: '0.85rem' }}>Add Friend to Trip</h3>
-            <form onSubmit={handleAddFriend}>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              if (!newFriendName.trim()) return;
+              const store = getLocalStore();
+              const newTM = {
+                id: `tm-${Date.now()}`,
+                trip_id: activeTrip.id,
+                name: newFriendName.trim(),
+                email: `${newFriendName.trim().toLowerCase().replace(/\s+/g, '')}@college.edu`,
+                avatar_color: '#059669'
+              };
+              if (!store.tripMembers) store.tripMembers = [];
+              store.tripMembers.push(newTM);
+              saveLocalStore(store);
+              setTripMembers([...tripMembers, newTM]);
+              setNewFriendName('');
+              setShowAddFriendModal(false);
+            }}>
               <div className="form-group">
                 <label className="form-label">Friend's Name</label>
                 <input
@@ -559,30 +529,20 @@ export default function App() {
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setShowAddFriendModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Add Friend</button>
+                <button type="submit" className="btn btn-primary">Add to Trip</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* Modals */}
+      {/* Add Expense Modal */}
       <AddExpenseModal
         isOpen={isAddExpenseOpen}
         onClose={() => setIsAddExpenseOpen(false)}
         tripMembers={tripMembers}
         currentUser={currentMember}
         onAddExpense={handleAddExpense}
-      />
-
-      <TripSelector
-        isOpen={isTripSelectorOpen}
-        onClose={() => setIsTripSelectorOpen(false)}
-        trips={trips}
-        activeTrip={activeTrip}
-        onSelectTrip={handleSelectTrip}
-        onCreateTrip={handleCreateTrip}
-        onJoinTrip={handleJoinTrip}
       />
     </div>
   );

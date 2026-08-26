@@ -1,25 +1,17 @@
 ﻿import React, { useState } from 'react';
-import { Compass, Users, Copy, Check, LogOut, ChevronDown, PlusCircle, UserPlus } from 'lucide-react';
+import { Compass, Users, ChevronRight, LogOut, ChevronDown, UserPlus } from 'lucide-react';
 
 export default function Navbar({
+  activeGroup,
   activeTrip,
   currentUser,
   allMembers,
   onChangeCurrentUser,
-  onOpenTripModal,
-  onOpenAddFriendModal,
+  onGoToGroups,
+  onGoToGroupDetail,
   onLogout
 }) {
-  const [copiedCode, setCopiedCode] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
-
-  const handleCopyCode = () => {
-    if (activeTrip?.code) {
-      navigator.clipboard.writeText(activeTrip.code);
-      setCopiedCode(true);
-      setTimeout(() => setCopiedCode(false), 2000);
-    }
-  };
 
   return (
     <header style={{
@@ -40,92 +32,64 @@ export default function Navbar({
         flexWrap: 'wrap',
         gap: '0.75rem'
       }}>
-        {/* Brand */}
+        {/* Brand & Breadcrumbs */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div style={{
-            width: '38px',
-            height: '38px',
-            borderRadius: '10px',
-            background: 'var(--primary)',
-            color: 'white',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 4px 10px rgba(79, 70, 229, 0.25)'
-          }}>
+          <div
+            onClick={onGoToGroups}
+            style={{
+              width: '38px',
+              height: '38px',
+              borderRadius: '10px',
+              background: 'var(--primary)',
+              color: 'white',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 4px 10px rgba(79, 70, 229, 0.25)',
+              cursor: 'pointer'
+            }}
+          >
             <Compass size={22} />
           </div>
-          <div>
-            <h2 style={{ fontSize: '1.2rem', fontWeight: '800', lineHeight: 1.1, color: 'var(--text-primary)' }}>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+            <span
+              onClick={onGoToGroups}
+              style={{ fontSize: '1.05rem', fontWeight: '800', color: 'var(--text-primary)', cursor: 'pointer' }}
+            >
               TripSplit
-            </h2>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
-              College Friends Expense Tracker
             </span>
+
+            {activeGroup && (
+              <>
+                <ChevronRight size={14} color="var(--text-muted)" />
+                <span
+                  onClick={onGoToGroupDetail}
+                  style={{
+                    fontSize: '0.875rem',
+                    fontWeight: 700,
+                    color: activeTrip ? 'var(--text-secondary)' : 'var(--primary)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {activeGroup.name}
+                </span>
+              </>
+            )}
+
+            {activeTrip && (
+              <>
+                <ChevronRight size={14} color="var(--text-muted)" />
+                <span style={{ fontSize: '0.875rem', fontWeight: 800, color: 'var(--primary)' }}>
+                  {activeTrip.title}
+                </span>
+              </>
+            )}
           </div>
         </div>
 
-        {/* Active Trip Badge & Invite Code */}
-        {activeTrip && (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            background: 'var(--bg-subtle)',
-            padding: '0.4rem 0.85rem',
-            borderRadius: 'var(--radius-full)',
-            border: '1px solid var(--border-color)'
-          }}>
-            <span style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--text-primary)' }}>
-              {activeTrip.title}
-            </span>
-
-            <button
-              onClick={handleCopyCode}
-              title="Click to copy trip code for friends"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.25rem',
-                background: 'var(--bg-card)',
-                border: '1px solid var(--border-color)',
-                padding: '0.2rem 0.5rem',
-                borderRadius: 'var(--radius-sm)',
-                fontSize: '0.75rem',
-                fontWeight: 600,
-                color: 'var(--primary)'
-              }}
-            >
-              {copiedCode ? <Check size={12} color="var(--success)" /> : <Copy size={12} />}
-              Code: {activeTrip.code}
-            </button>
-
-            <button
-              onClick={onOpenTripModal}
-              title="Switch or Create Trip"
-              className="btn btn-secondary btn-sm"
-              style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
-            >
-              <PlusCircle size={14} /> Switch
-            </button>
-          </div>
-        )}
-
-        {/* Controls & Profile */}
+        {/* Member Profile Switcher & Logout */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          {/* Add Friend Button */}
-          {activeTrip && (
-            <button
-              onClick={onOpenAddFriendModal}
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: '0.8rem' }}
-              title="Add a friend to this trip"
-            >
-              <UserPlus size={14} color="var(--primary)" /> Add Friend
-            </button>
-          )}
-
-          {/* Member Switcher Dropdown */}
           {currentUser && (
             <div style={{ position: 'relative' }}>
               <button
@@ -170,41 +134,44 @@ export default function Navbar({
                   padding: '0.5rem',
                   zIndex: 60
                 }} className="animate-pop-in">
-                  <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', padding: '0.35rem 0.65rem' }}>
-                    View Portal As Member:
-                  </p>
-                  {allMembers.map(m => (
-                    <button
-                      key={m.id}
-                      onClick={() => {
-                        onChangeCurrentUser(m);
-                        setShowUserDropdown(false);
-                      }}
-                      style={{
-                        width: '100%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        padding: '0.45rem 0.65rem',
-                        borderRadius: 'var(--radius-sm)',
-                        fontSize: '0.85rem',
-                        fontWeight: m.id === currentUser.id ? 700 : 500,
-                        background: m.id === currentUser.id ? 'var(--primary-light)' : 'transparent',
-                        color: m.id === currentUser.id ? 'var(--primary)' : 'var(--text-primary)',
-                        textAlign: 'left'
-                      }}
-                    >
-                      <div
-                        className="avatar-circle"
-                        style={{ width: '22px', height: '22px', fontSize: '0.7rem', backgroundColor: m.avatar_color }}
-                      >
-                        {m.name.charAt(0)}
-                      </div>
-                      {m.name}
-                    </button>
-                  ))}
-
-                  <div style={{ borderTop: '1px solid var(--border-color)', margin: '0.4rem 0' }}></div>
+                  {allMembers.length > 0 && (
+                    <>
+                      <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', padding: '0.35rem 0.65rem' }}>
+                        View Portal As:
+                      </p>
+                      {allMembers.map(m => (
+                        <button
+                          key={m.id}
+                          onClick={() => {
+                            onChangeCurrentUser(m);
+                            setShowUserDropdown(false);
+                          }}
+                          style={{
+                            width: '100%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            padding: '0.45rem 0.65rem',
+                            borderRadius: 'var(--radius-sm)',
+                            fontSize: '0.85rem',
+                            fontWeight: m.id === currentUser.id ? 700 : 500,
+                            background: m.id === currentUser.id ? 'var(--primary-light)' : 'transparent',
+                            color: m.id === currentUser.id ? 'var(--primary)' : 'var(--text-primary)',
+                            textAlign: 'left'
+                          }}
+                        >
+                          <div
+                            className="avatar-circle"
+                            style={{ width: '22px', height: '22px', fontSize: '0.7rem', backgroundColor: m.avatar_color }}
+                          >
+                            {m.name.charAt(0)}
+                          </div>
+                          {m.name}
+                        </button>
+                      ))}
+                      <div style={{ borderTop: '1px solid var(--border-color)', margin: '0.4rem 0' }}></div>
+                    </>
+                  )}
 
                   <button
                     onClick={() => { setShowUserDropdown(false); onLogout(); }}

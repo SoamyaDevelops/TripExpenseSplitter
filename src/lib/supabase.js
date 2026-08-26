@@ -6,24 +6,27 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Clean Initial Data Store - 100% Real User Inputs Only
+// Empty Clean Initial Store
 export const EMPTY_INITIAL_DATA = {
+  groups: [],
+  groupMembers: [],
   trips: [],
-  members: [],
+  tripMembers: [],
   expenses: [],
-  settlements: []
+  settlements: [],
+  chatMessages: []
 };
 
 // Local storage state helpers
 export const getLocalStore = () => {
-  const data = localStorage.getItem('trip_split_prod_v3');
+  const data = localStorage.getItem('trip_split_groups_v4');
   if (!data) {
-    localStorage.setItem('trip_split_prod_v3', JSON.stringify(EMPTY_INITIAL_DATA));
+    localStorage.setItem('trip_split_groups_v4', JSON.stringify(EMPTY_INITIAL_DATA));
     return EMPTY_INITIAL_DATA;
   }
   return JSON.parse(data);
 };
 
 export const saveLocalStore = (data) => {
-  localStorage.setItem('trip_split_prod_v3', JSON.stringify(data));
+  localStorage.setItem('trip_split_groups_v4', JSON.stringify(data));
 };

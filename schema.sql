@@ -1,31 +1,54 @@
 ﻿-- ====================================================================
--- TRIP SPLIT: SUPABASE DATABASE SETUP SCRIPT
--- Run this script in your Supabase SQL Editor (https://supabase.com/dashboard)
+-- TRIP SPLIT: COMPLETE SUPABASE DATABASE SETUP SCRIPT
+-- Copy and run this script in your Supabase SQL Editor (https://supabase.com/dashboard)
 -- ====================================================================
 
 -- 1. Enable UUID Extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 2. CREATE PROFILES TABLE (Stores user display info)
+-- 2. CREATE PROFILES TABLE (Stores registered user profiles)
 CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     full_name TEXT NOT NULL,
-    email TEXT,
+    email TEXT UNIQUE,
     avatar_color TEXT DEFAULT '#4f46e5',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 3. CREATE TRIPS TABLE
-CREATE TABLE IF NOT EXISTS public.trips (
+-- 3. CREATE GROUPS TABLE (College Squads / Friend Circles)
+CREATE TABLE IF NOT EXISTS public.groups (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    title TEXT NOT NULL,
+    name TEXT NOT NULL,
     description TEXT,
-    code TEXT UNIQUE NOT NULL,
     created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. CREATE TRIP MEMBERS TABLE
+-- 4. CREATE GROUP MEMBERS TABLE
+CREATE TABLE IF NOT EXISTS public.group_members (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    group_id UUID NOT NULL REFERENCES public.groups(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    display_name TEXT NOT NULL,
+    email TEXT,
+    avatar_color TEXT DEFAULT '#4f46e5',
+    joined_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT unique_group_user UNIQUE (group_id, user_id)
+);
+
+-- 5. CREATE TRIPS TABLE (Belongs to a Group)
+CREATE TABLE IF NOT EXISTS public.trips (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    group_id UUID REFERENCES public.groups(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT,
+    code TEXT UNIQUE NOT NULL,
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'completed')),
+    created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. CREATE TRIP MEMBERS TABLE
 CREATE TABLE IF NOT EXISTS public.trip_members (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     trip_id UUID NOT NULL REFERENCES public.trips(id) ON DELETE CASCADE,
@@ -37,7 +60,7 @@ CREATE TABLE IF NOT EXISTS public.trip_members (
     CONSTRAINT unique_trip_user UNIQUE (trip_id, user_id)
 );
 
--- 5. CREATE EXPENSES TABLE
+-- 7. CREATE EXPENSES TABLE (With title for what they spent)
 CREATE TABLE IF NOT EXISTS public.expenses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     trip_id UUID NOT NULL REFERENCES public.trips(id) ON DELETE CASCADE,
@@ -48,7 +71,7 @@ CREATE TABLE IF NOT EXISTS public.expenses (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 6. CREATE EXPENSE SPLITS TABLE
+-- 8. CREATE EXPENSE SPLITS TABLE (Individual equal portions)
 CREATE TABLE IF NOT EXISTS public.expense_splits (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     expense_id UUID NOT NULL REFERENCES public.expenses(id) ON DELETE CASCADE,
@@ -57,7 +80,7 @@ CREATE TABLE IF NOT EXISTS public.expense_splits (
     CONSTRAINT unique_expense_member UNIQUE (expense_id, member_id)
 );
 
--- 7. CREATE SETTLEMENTS TABLE
+-- 9. CREATE SETTLEMENTS TABLE (Repayments between friends)
 CREATE TABLE IF NOT EXISTS public.settlements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     trip_id UUID NOT NULL REFERENCES public.trips(id) ON DELETE CASCADE,
@@ -67,7 +90,7 @@ CREATE TABLE IF NOT EXISTS public.settlements (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 8. CREATE CHAT MESSAGES TABLE (Group Chat & System Activity Feed)
+-- 10. CREATE CHAT MESSAGES TABLE (Group Chat & Activity Logs)
 CREATE TABLE IF NOT EXISTS public.chat_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     trip_id UUID NOT NULL REFERENCES public.trips(id) ON DELETE CASCADE,
@@ -78,7 +101,7 @@ CREATE TABLE IF NOT EXISTS public.chat_messages (
 );
 
 -- ====================================================================
--- AUTOMATIC PROFILE TRIGGER ON SIGNUP
+-- AUTOMATIC PROFILE TRIGGER ON USER SIGNUP
 -- ====================================================================
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger AS $$
@@ -106,6 +129,8 @@ CREATE TRIGGER on_auth_user_created
 -- ROW LEVEL SECURITY (RLS) POLICIES
 -- ====================================================================
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.groups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.group_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.trips ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.trip_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.expenses ENABLE ROW LEVEL SECURITY;
@@ -116,6 +141,16 @@ ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow public select profiles" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Allow user insert profiles" ON public.profiles FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow user update profiles" ON public.profiles FOR UPDATE USING (true);
+
+CREATE POLICY "Allow public select groups" ON public.groups FOR SELECT USING (true);
+CREATE POLICY "Allow public insert groups" ON public.groups FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update groups" ON public.groups FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete groups" ON public.groups FOR DELETE USING (true);
+
+CREATE POLICY "Allow public select group_members" ON public.group_members FOR SELECT USING (true);
+CREATE POLICY "Allow public insert group_members" ON public.group_members FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update group_members" ON public.group_members FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete group_members" ON public.group_members FOR DELETE USING (true);
 
 CREATE POLICY "Allow public select trips" ON public.trips FOR SELECT USING (true);
 CREATE POLICY "Allow public insert trips" ON public.trips FOR INSERT WITH CHECK (true);
