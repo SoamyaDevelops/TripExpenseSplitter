@@ -17,10 +17,7 @@ export const searchSupabaseProfiles = async (query) => {
       .or(`email.ilike.%${cleanQ}%,full_name.ilike.%${cleanQ}%`)
       .limit(10);
 
-    if (error) {
-      console.warn('Supabase profile query notice:', error.message);
-      return [];
-    }
+    if (error) return [];
     return data || [];
   } catch (err) {
     console.error('Failed to search Supabase profiles:', err);
@@ -162,7 +159,6 @@ export const createSupabaseGroup = async ({ name, description, created_by, membe
 
     const group_id = groupData.id;
 
-    // Prepare member rows
     const memberRows = members.map(m => ({
       group_id,
       user_id: m.user_id || m.id || null,
@@ -187,7 +183,6 @@ export const createSupabaseGroup = async ({ name, description, created_by, membe
 
 export const fetchSupabaseUserGroups = async (userEmail, userId) => {
   try {
-    // 1. Fetch group_members where user matches email or user_id
     let memberQuery = supabase.from('group_members').select('*');
     if (userEmail && userId) {
       memberQuery = memberQuery.or(`user_id.eq.${userId},email.ilike.${userEmail}`);
@@ -203,7 +198,6 @@ export const fetchSupabaseUserGroups = async (userEmail, userId) => {
 
     const groupIds = Array.from(new Set(myMemberships.map(m => m.group_id)));
 
-    // 2. Fetch all groups matching groupIds
     const { data: groupList, error: groupErr } = await supabase
       .from('groups')
       .select('*')
@@ -212,7 +206,6 @@ export const fetchSupabaseUserGroups = async (userEmail, userId) => {
 
     if (groupErr) return { groups: [], groupMembers: [] };
 
-    // 3. Fetch all members for these groups
     const { data: allGroupMembers } = await supabase
       .from('group_members')
       .select('*')
@@ -249,6 +242,118 @@ export const addSupabaseGroupMember = async (groupId, display_name, email, avata
   }
 };
 
+// REAL SUPABASE TRIPS & TRIP MEMBERS FUNCTIONS
+export const createSupabaseTrip = async ({ group_id, title, description, code, created_by, selected_group_members }) => {
+  try {
+    const { data: tripData, error: tripErr } = await supabase
+      .from('trips')
+      .insert({
+        group_id,
+        title,
+        description,
+        code,
+        status: 'active',
+        created_by
+      })
+      .select()
+      .single();
+
+    if (tripErr) throw tripErr;
+
+    const trip_id = tripData.id;
+
+    // Create trip_members for all selected group members
+    const memberRows = selected_group_members.map(gm => ({
+      trip_id,
+      user_id: gm.user_id || null,
+      name: gm.display_name || gm.name,
+      email: gm.email || '',
+      avatar_color: gm.avatar_color || '#4f46e5'
+    }));
+
+    const { data: tmData, error: tmErr } = await supabase
+      .from('trip_members')
+      .insert(memberRows)
+      .select();
+
+    if (tmErr) console.warn('Trip members insert notice:', tmErr.message);
+
+    // Initial system chat event
+    await supabase.from('chat_messages').insert({
+      trip_id,
+      text: `🎉 Trip "${title}" was created!`,
+      is_system_event: true,
+      created_at: new Date().toISOString()
+    });
+
+    return { success: true, trip: tripData, members: tmData || memberRows };
+  } catch (err) {
+    console.error('Failed to create trip in Supabase:', err);
+    return { success: false, error: err.message };
+  }
+};
+
+export const fetchSupabaseGroupTrips = async (groupId) => {
+  if (!groupId) return { trips: [], tripMembers: [], expenses: [] };
+  try {
+    const { data: tripList, error: tripErr } = await supabase
+      .from('trips')
+      .select('*')
+      .eq('group_id', groupId)
+      .order('created_at', { ascending: false });
+
+    if (tripErr || !tripList) return { trips: [], tripMembers: [], expenses: [] };
+
+    const tripIds = tripList.map(t => t.id);
+    if (tripIds.length === 0) return { trips: tripList, tripMembers: [], expenses: [] };
+
+    const { data: tmList } = await supabase.from('trip_members').select('*').in('trip_id', tripIds);
+    const { data: expList } = await supabase.from('expenses').select('*').in('trip_id', tripIds);
+
+    return {
+      trips: tripList,
+      tripMembers: tmList || [],
+      expenses: expList || []
+    };
+  } catch (err) {
+    console.error('Failed to fetch group trips from Supabase:', err);
+    return { trips: [], tripMembers: [], expenses: [] };
+  }
+};
+
+export const fetchSupabaseTripWorkspace = async (tripId) => {
+  if (!tripId) return { tripMembers: [], expenses: [], settlements: [], chatMessages: [] };
+  try {
+    const { data: tmList } = await supabase.from('trip_members').select('*').eq('trip_id', tripId);
+    const { data: expList } = await supabase.from('expenses').select('*').eq('trip_id', tripId).order('created_at', { ascending: false });
+    const { data: splitList } = await supabase.from('expense_splits').select('*');
+    const { data: setList } = await supabase.from('settlements').select('*').eq('trip_id', tripId).order('created_at', { ascending: false });
+    const { data: msgList } = await supabase.from('chat_messages').select('*').eq('trip_id', tripId).order('created_at', { ascending: true });
+
+    // Map splits into expenses
+    const splitMap = {};
+    (splitList || []).forEach(s => {
+      if (!splitMap[s.expense_id]) splitMap[s.expense_id] = [];
+      splitMap[s.expense_id].push(s);
+    });
+
+    const enrichedExpenses = (expList || []).map(e => ({
+      ...e,
+      splits: splitMap[e.id] || []
+    }));
+
+    return {
+      tripMembers: tmList || [],
+      expenses: enrichedExpenses,
+      settlements: setList || [],
+      chatMessages: msgList || []
+    };
+  } catch (err) {
+    console.error('Failed to fetch trip workspace from Supabase:', err);
+    return { tripMembers: [], expenses: [], settlements: [], chatMessages: [] };
+  }
+};
+
 // Initial store fallback structure
 export const EMPTY_INITIAL_DATA = {
   groups: [],
@@ -263,14 +368,14 @@ export const EMPTY_INITIAL_DATA = {
 
 // Local storage state helpers
 export const getLocalStore = () => {
-  const data = localStorage.getItem('trip_split_groups_v7');
+  const data = localStorage.getItem('trip_split_trips_v8');
   if (!data) {
-    localStorage.setItem('trip_split_groups_v7', JSON.stringify(EMPTY_INITIAL_DATA));
+    localStorage.setItem('trip_split_trips_v8', JSON.stringify(EMPTY_INITIAL_DATA));
     return EMPTY_INITIAL_DATA;
   }
   return JSON.parse(data);
 };
 
 export const saveLocalStore = (data) => {
-  localStorage.setItem('trip_split_groups_v7', JSON.stringify(data));
+  localStorage.setItem('trip_split_trips_v8', JSON.stringify(data));
 };

@@ -19,7 +19,10 @@ import {
   respondSupabaseFriendRequest,
   createSupabaseGroup,
   fetchSupabaseUserGroups,
-  addSupabaseGroupMember
+  addSupabaseGroupMember,
+  createSupabaseTrip,
+  fetchSupabaseGroupTrips,
+  fetchSupabaseTripWorkspace
 } from './lib/supabase';
 import { User, Receipt, Zap, MessageSquare, ArrowLeft, UserPlus } from 'lucide-react';
 import './App.css';
@@ -77,7 +80,7 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Poll for live friendship requests & live groups every 4 seconds
+  // Poll for live friendship requests, live groups & live active trips every 3 seconds
   useEffect(() => {
     if (!sessionUser) return;
 
@@ -96,12 +99,34 @@ export default function App() {
         setGroups(liveGroupRes.groups);
         setGroupMembers(liveGroupRes.groupMembers);
       }
+
+      // 3. Sync Trips for Active Group
+      if (activeGroup?.id) {
+        const liveTripRes = await fetchSupabaseGroupTrips(activeGroup.id);
+        if (liveTripRes.trips) {
+          setTrips(prev => {
+            const otherTrips = prev.filter(t => t.group_id !== activeGroup.id);
+            return [...liveTripRes.trips, ...otherTrips];
+          });
+        }
+      }
+
+      // 4. Sync Workspace for Active Trip
+      if (activeTrip?.id) {
+        const liveWorkspace = await fetchSupabaseTripWorkspace(activeTrip.id);
+        if (liveWorkspace.tripMembers && liveWorkspace.tripMembers.length > 0) {
+          setTripMembers(liveWorkspace.tripMembers);
+          setExpenses(liveWorkspace.expenses);
+          setSettlements(liveWorkspace.settlements);
+          setChatMessages(liveWorkspace.chatMessages);
+        }
+      }
     };
 
     syncLiveSupabaseData();
-    const interval = setInterval(syncLiveSupabaseData, 4000);
+    const interval = setInterval(syncLiveSupabaseData, 3000);
     return () => clearInterval(interval);
-  }, [sessionUser, userProfile?.id]);
+  }, [sessionUser, userProfile?.id, activeGroup?.id, activeTrip?.id]);
 
   const loadSupabaseGroups = async (user) => {
     const res = await fetchSupabaseUserGroups(user.email, user.id);
@@ -175,45 +200,47 @@ export default function App() {
     };
   });
 
-  // Open Group Detail
-  const handleSelectGroup = (group) => {
+  // Open Group Detail & Fetch Trips from Supabase
+  const handleSelectGroup = async (group) => {
     setActiveGroup(group);
     setViewMode('group_detail');
+
+    // Fetch live trips for this group from Supabase DB
+    const res = await fetchSupabaseGroupTrips(group.id);
+    if (res.trips && res.trips.length > 0) {
+      setTrips(prev => {
+        const otherTrips = prev.filter(t => t.group_id !== group.id);
+        return [...res.trips, ...otherTrips];
+      });
+    }
   };
 
   // Open Trip Detail Workspace
-  const handleSelectTrip = (trip) => {
-    const store = getLocalStore();
+  const handleSelectTrip = async (trip) => {
     setActiveTrip(trip);
 
+    const store = getLocalStore();
     const parentGroup = (store.groups || []).find(g => g.id === trip.group_id);
     if (parentGroup) setActiveGroup(parentGroup);
 
-    const members = (store.tripMembers || []).filter(m => m.trip_id === trip.id);
-    const exps = (store.expenses || []).filter(e => e.trip_id === trip.id);
-    const sets = (store.settlements || []).filter(s => s.trip_id === trip.id);
-    const msgs = (store.chatMessages || []).filter(c => c.trip_id === trip.id);
+    // Fetch live workspace from Supabase DB
+    const liveWorkspace = await fetchSupabaseTripWorkspace(trip.id);
+    if (liveWorkspace.tripMembers && liveWorkspace.tripMembers.length > 0) {
+      setTripMembers(liveWorkspace.tripMembers);
+      setExpenses(liveWorkspace.expenses);
+      setSettlements(liveWorkspace.settlements);
+      setChatMessages(liveWorkspace.chatMessages);
 
-    setTripMembers(members);
-    setExpenses(exps);
-    setSettlements(sets);
-    setChatMessages(msgs);
-
-    if (members.length > 0) {
-      setCurrentMember(members[0]);
+      // Select current user's member card
+      const myMemberCard = liveWorkspace.tripMembers.find(m => m.user_id === userProfile?.id || m.email === userProfile?.email) || liveWorkspace.tripMembers[0];
+      setCurrentMember(myMemberCard);
     } else {
-      const myMember = {
-        id: `tm-${Date.now()}`,
-        trip_id: trip.id,
-        name: userProfile?.name || 'Me',
-        email: sessionUser?.email || 'me@college.edu',
-        avatar_color: userProfile?.avatar_color || '#4f46e5'
-      };
-      if (!store.tripMembers) store.tripMembers = [];
-      store.tripMembers.push(myMember);
-      saveLocalStore(store);
-      setTripMembers([myMember]);
-      setCurrentMember(myMember);
+      const members = (store.tripMembers || []).filter(m => m.trip_id === trip.id);
+      setTripMembers(members);
+      setExpenses((store.expenses || []).filter(e => e.trip_id === trip.id));
+      setSettlements((store.settlements || []).filter(s => s.trip_id === trip.id));
+      setChatMessages((store.chatMessages || []).filter(c => c.trip_id === trip.id));
+      if (members.length > 0) setCurrentMember(members[0]);
     }
 
     setViewMode('trip_detail');
@@ -239,7 +266,6 @@ export default function App() {
       }))
     ];
 
-    // Persist to Supabase DB
     const res = await createSupabaseGroup({
       name,
       description,
@@ -291,6 +317,44 @@ export default function App() {
     saveLocalStore(store);
 
     setGroupMembers([...store.groupMembers]);
+  };
+
+  // Create Trip inside Group Handler WITH LIVE SUPABASE SYNC FOR ALL GROUP MEMBERS
+  const handleCreateTripInGroup = async ({ group_id, title, description, code, selected_member_ids }) => {
+    const store = getLocalStore();
+    const activeGMs = (store.groupMembers || groupMembers).filter(gm => gm.group_id === group_id && selected_member_ids.includes(gm.id));
+
+    // Save to Supabase DB so ALL group members can see it live!
+    const res = await createSupabaseTrip({
+      group_id,
+      title,
+      description,
+      code,
+      created_by: sessionUser?.id,
+      selected_group_members: activeGMs
+    });
+
+    const createdTrip = res.trip || {
+      id: `trip-${Date.now()}`,
+      group_id,
+      title,
+      description,
+      code,
+      status: 'active',
+      created_by: sessionUser?.id,
+      created_at: new Date().toISOString()
+    };
+
+    if (!store.trips) store.trips = [];
+    store.trips.unshift(createdTrip);
+
+    if (!store.tripMembers) store.tripMembers = [];
+    (res.members || []).forEach(tm => store.tripMembers.push(tm));
+
+    saveLocalStore(store);
+
+    setTrips([createdTrip, ...trips]);
+    handleSelectTrip(createdTrip);
   };
 
   // FRIEND REQUEST HANDLERS
@@ -345,54 +409,8 @@ export default function App() {
     setFriendships([...store.friendships]);
   };
 
-  // Create Trip inside Group Handler
-  const handleCreateTripInGroup = ({ group_id, title, description, code, selected_member_ids }) => {
-    const store = getLocalStore();
-    const newTrip = {
-      id: `trip-${Date.now()}`,
-      group_id,
-      title,
-      description,
-      code,
-      status: 'active',
-      created_by: sessionUser?.id,
-      created_at: new Date().toISOString()
-    };
-
-    if (!store.trips) store.trips = [];
-    store.trips.unshift(newTrip);
-
-    const activeGMs = (store.groupMembers || []).filter(gm => gm.group_id === group_id && selected_member_ids.includes(gm.id));
-    if (!store.tripMembers) store.tripMembers = [];
-
-    activeGMs.forEach(gm => {
-      store.tripMembers.push({
-        id: `tm-${Date.now()}-${gm.id}`,
-        trip_id: newTrip.id,
-        name: gm.display_name,
-        email: gm.email,
-        avatar_color: gm.avatar_color
-      });
-    });
-
-    const initMsg = {
-      id: `chat-${Date.now()}`,
-      trip_id: newTrip.id,
-      text: `🎉 Trip "${newTrip.title}" was created!`,
-      is_system_event: true,
-      created_at: new Date().toISOString()
-    };
-    if (!store.chatMessages) store.chatMessages = [];
-    store.chatMessages.push(initMsg);
-
-    saveLocalStore(store);
-
-    setTrips([newTrip, ...trips]);
-    handleSelectTrip(newTrip);
-  };
-
   // Add Expense Handler
-  const handleAddExpense = (newExp) => {
+  const handleAddExpense = async (newExp) => {
     if (!activeTrip) return;
 
     const store = getLocalStore();
@@ -421,6 +439,24 @@ export default function App() {
     if (!store.chatMessages) store.chatMessages = [];
     store.chatMessages.push(notificationMsg);
 
+    // Save to Supabase DB as well
+    try {
+      await supabase.from('expenses').insert({
+        trip_id: activeTrip.id,
+        title: newExp.title,
+        amount: newExp.amount,
+        paid_by: newExp.paid_by,
+        category: newExp.category
+      });
+      await supabase.from('chat_messages').insert({
+        trip_id: activeTrip.id,
+        text: notificationMsg.text,
+        is_system_event: true
+      });
+    } catch (e) {
+      console.warn('Supabase expense insert notice:', e.message);
+    }
+
     saveLocalStore(store);
 
     setExpenses([created, ...expenses]);
@@ -428,16 +464,22 @@ export default function App() {
   };
 
   // Delete Expense Handler
-  const handleDeleteExpense = (expId) => {
+  const handleDeleteExpense = async (expId) => {
     const store = getLocalStore();
     store.expenses = (store.expenses || []).filter(e => e.id !== expId);
     saveLocalStore(store);
+
+    try {
+      await supabase.from('expenses').delete().eq('id', expId);
+    } catch (e) {
+      console.warn('Supabase expense delete notice:', e.message);
+    }
 
     setExpenses(expenses.filter(e => e.id !== expId));
   };
 
   // Settle Up Handler
-  const handleSettleUp = (fromMemberId, toMemberId, amount) => {
+  const handleSettleUp = async (fromMemberId, toMemberId, amount) => {
     if (!activeTrip) return;
 
     const store = getLocalStore();
@@ -467,6 +509,22 @@ export default function App() {
     if (!store.chatMessages) store.chatMessages = [];
     store.chatMessages.push(setMsg);
 
+    try {
+      await supabase.from('settlements').insert({
+        trip_id: activeTrip.id,
+        from_member_id: fromMemberId,
+        to_member_id: toMemberId,
+        amount: Number(amount)
+      });
+      await supabase.from('chat_messages').insert({
+        trip_id: activeTrip.id,
+        text: setMsg.text,
+        is_system_event: true
+      });
+    } catch (e) {
+      console.warn('Supabase settlement insert notice:', e.message);
+    }
+
     saveLocalStore(store);
 
     setSettlements([newSettlement, ...settlements]);
@@ -474,7 +532,7 @@ export default function App() {
   };
 
   // Send Group Chat Message
-  const handleSendMessage = (msgObj) => {
+  const handleSendMessage = async (msgObj) => {
     if (!activeTrip) return;
 
     const store = getLocalStore();
@@ -487,6 +545,18 @@ export default function App() {
 
     if (!store.chatMessages) store.chatMessages = [];
     store.chatMessages.push(newMsg);
+
+    try {
+      await supabase.from('chat_messages').insert({
+        trip_id: activeTrip.id,
+        sender_id: msgObj.sender_id,
+        text: msgObj.text,
+        is_system_event: false
+      });
+    } catch (e) {
+      console.warn('Supabase chat message insert notice:', e.message);
+    }
+
     saveLocalStore(store);
 
     setChatMessages([...chatMessages, newMsg]);
