@@ -22,6 +22,11 @@ export const generateUUID = () => {
   });
 };
 
+export const ensureUUID = (idStr) => {
+  if (isValidUUID(idStr)) return idStr;
+  return generateUUID();
+};
+
 // Search Supabase profiles table for real registered users
 export const searchSupabaseProfiles = async (query) => {
   if (!query || query.trim().length < 2) return [];
@@ -269,17 +274,14 @@ export const addSupabaseGroupMember = async (groupId, display_name, email, avata
 
 // REAL SUPABASE TRIPS & TRIP MEMBERS FUNCTIONS
 export const createSupabaseTrip = async ({ group_id, title, description, code, created_by, selected_group_members }) => {
-  if (!isValidUUID(group_id)) {
-    console.error('Cannot create trip: group_id is not a valid UUID:', group_id);
-    return { success: false, error: 'Invalid Group UUID' };
-  }
+  const safeGroupId = ensureUUID(group_id);
   try {
     const validCreatorId = isValidUUID(created_by) ? created_by : null;
 
     const { data: tripData, error: tripErr } = await supabase
       .from('trips')
       .insert({
-        group_id,
+        group_id: safeGroupId,
         title,
         description,
         code,
@@ -398,16 +400,30 @@ export const EMPTY_INITIAL_DATA = {
   friendships: []
 };
 
-// Local storage state helpers
+// Local storage state helpers with automatic UUID conversion for legacy IDs
 export const getLocalStore = () => {
-  const data = localStorage.getItem('trip_split_v9_uuid');
-  if (!data) {
-    localStorage.setItem('trip_split_v9_uuid', JSON.stringify(EMPTY_INITIAL_DATA));
+  try {
+    const raw = localStorage.getItem('trip_split_clean_v10');
+    if (!raw) {
+      localStorage.setItem('trip_split_clean_v10', JSON.stringify(EMPTY_INITIAL_DATA));
+      return EMPTY_INITIAL_DATA;
+    }
+    const parsed = JSON.parse(raw);
+
+    // Sanitize any legacy non-UUID IDs
+    if (parsed.groups) {
+      parsed.groups = parsed.groups.map(g => ({ ...g, id: ensureUUID(g.id) }));
+    }
+    if (parsed.trips) {
+      parsed.trips = parsed.trips.map(t => ({ ...t, id: ensureUUID(t.id), group_id: ensureUUID(t.group_id) }));
+    }
+
+    return parsed;
+  } catch (e) {
     return EMPTY_INITIAL_DATA;
   }
-  return JSON.parse(data);
 };
 
 export const saveLocalStore = (data) => {
-  localStorage.setItem('trip_split_v9_uuid', JSON.stringify(data));
+  localStorage.setItem('trip_split_clean_v10', JSON.stringify(data));
 };

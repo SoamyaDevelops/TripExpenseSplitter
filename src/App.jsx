@@ -14,6 +14,7 @@ import {
   supabase,
   generateUUID,
   isValidUUID,
+  ensureUUID,
   getLocalStore,
   saveLocalStore,
   sendSupabaseFriendRequest,
@@ -103,19 +104,21 @@ export default function App() {
       }
 
       // 3. Sync Trips for Active Group
-      if (activeGroup?.id && isValidUUID(activeGroup.id)) {
-        const liveTripRes = await fetchSupabaseGroupTrips(activeGroup.id);
+      if (activeGroup?.id) {
+        const safeGId = ensureUUID(activeGroup.id);
+        const liveTripRes = await fetchSupabaseGroupTrips(safeGId);
         if (liveTripRes.trips) {
           setTrips(prev => {
-            const otherTrips = prev.filter(t => t.group_id !== activeGroup.id);
+            const otherTrips = prev.filter(t => t.group_id !== safeGId);
             return [...liveTripRes.trips, ...otherTrips];
           });
         }
       }
 
       // 4. Sync Workspace for Active Trip
-      if (activeTrip?.id && isValidUUID(activeTrip.id)) {
-        const liveWorkspace = await fetchSupabaseTripWorkspace(activeTrip.id);
+      if (activeTrip?.id) {
+        const safeTId = ensureUUID(activeTrip.id);
+        const liveWorkspace = await fetchSupabaseTripWorkspace(safeTId);
         if (liveWorkspace.tripMembers && liveWorkspace.tripMembers.length > 0) {
           setTripMembers(liveWorkspace.tripMembers);
           setExpenses(liveWorkspace.expenses);
@@ -208,14 +211,13 @@ export default function App() {
     setActiveGroup(group);
     setViewMode('group_detail');
 
-    if (isValidUUID(group.id)) {
-      const res = await fetchSupabaseGroupTrips(group.id);
-      if (res.trips && res.trips.length > 0) {
-        setTrips(prev => {
-          const otherTrips = prev.filter(t => t.group_id !== group.id);
-          return [...res.trips, ...otherTrips];
-        });
-      }
+    const safeGId = ensureUUID(group.id);
+    const res = await fetchSupabaseGroupTrips(safeGId);
+    if (res.trips && res.trips.length > 0) {
+      setTrips(prev => {
+        const otherTrips = prev.filter(t => t.group_id !== safeGId);
+        return [...res.trips, ...otherTrips];
+      });
     }
   };
 
@@ -227,24 +229,16 @@ export default function App() {
     const parentGroup = (store.groups || []).find(g => g.id === trip.group_id);
     if (parentGroup) setActiveGroup(parentGroup);
 
-    if (isValidUUID(trip.id)) {
-      const liveWorkspace = await fetchSupabaseTripWorkspace(trip.id);
-      if (liveWorkspace.tripMembers && liveWorkspace.tripMembers.length > 0) {
-        setTripMembers(liveWorkspace.tripMembers);
-        setExpenses(liveWorkspace.expenses);
-        setSettlements(liveWorkspace.settlements);
-        setChatMessages(liveWorkspace.chatMessages);
+    const safeTId = ensureUUID(trip.id);
+    const liveWorkspace = await fetchSupabaseTripWorkspace(safeTId);
+    if (liveWorkspace.tripMembers && liveWorkspace.tripMembers.length > 0) {
+      setTripMembers(liveWorkspace.tripMembers);
+      setExpenses(liveWorkspace.expenses);
+      setSettlements(liveWorkspace.settlements);
+      setChatMessages(liveWorkspace.chatMessages);
 
-        const myMemberCard = liveWorkspace.tripMembers.find(m => m.user_id === userProfile?.id || m.email === userProfile?.email) || liveWorkspace.tripMembers[0];
-        setCurrentMember(myMemberCard);
-      } else {
-        const members = (store.tripMembers || []).filter(m => m.trip_id === trip.id);
-        setTripMembers(members);
-        setExpenses((store.expenses || []).filter(e => e.trip_id === trip.id));
-        setSettlements((store.settlements || []).filter(s => s.trip_id === trip.id));
-        setChatMessages((store.chatMessages || []).filter(c => c.trip_id === trip.id));
-        if (members.length > 0) setCurrentMember(members[0]);
-      }
+      const myMemberCard = liveWorkspace.tripMembers.find(m => m.user_id === userProfile?.id || m.email === userProfile?.email) || liveWorkspace.tripMembers[0];
+      setCurrentMember(myMemberCard);
     } else {
       const members = (store.tripMembers || []).filter(m => m.trip_id === trip.id);
       setTripMembers(members);
@@ -311,12 +305,13 @@ export default function App() {
   const handleAddMemberToGroup = async (groupId, memberName, email = '') => {
     const colorList = ['#4f46e5', '#059669', '#d97706', '#e11d48', '#0284c7', '#7c3aed'];
     const avatarColor = colorList[groupMembers.length % colorList.length];
+    const safeGId = ensureUUID(groupId);
 
-    const res = await addSupabaseGroupMember(groupId, memberName, email, avatarColor);
+    const res = await addSupabaseGroupMember(safeGId, memberName, email, avatarColor);
 
     const newGM = res.member || {
       id: generateUUID(),
-      group_id: groupId,
+      group_id: safeGId,
       display_name: memberName,
       email: email || `${memberName.toLowerCase().replace(/\s+/g, '')}@college.edu`,
       avatar_color: avatarColor
@@ -332,12 +327,13 @@ export default function App() {
 
   // Create Trip inside Group Handler WITH LIVE SUPABASE SYNC FOR ALL GROUP MEMBERS
   const handleCreateTripInGroup = async ({ group_id, title, description, code, selected_member_ids }) => {
+    const safeGId = ensureUUID(group_id);
     const store = getLocalStore();
-    const activeGMs = (store.groupMembers || groupMembers).filter(gm => gm.group_id === group_id && selected_member_ids.includes(gm.id));
+    const activeGMs = (store.groupMembers || groupMembers).filter(gm => gm.group_id === safeGId && selected_member_ids.includes(gm.id));
 
     // Save to Supabase DB so ALL group members can see it live!
     const res = await createSupabaseTrip({
-      group_id,
+      group_id: safeGId,
       title,
       description,
       code,
@@ -347,7 +343,7 @@ export default function App() {
 
     const createdTrip = res.trip || {
       id: generateUUID(),
-      group_id,
+      group_id: safeGId,
       title,
       description,
       code,
@@ -424,10 +420,11 @@ export default function App() {
   const handleAddExpense = async (newExp) => {
     if (!activeTrip) return;
 
+    const safeTId = ensureUUID(activeTrip.id);
     const store = getLocalStore();
     const created = {
       id: generateUUID(),
-      trip_id: activeTrip.id,
+      trip_id: safeTId,
       ...newExp,
       created_at: new Date().toISOString()
     };
@@ -441,7 +438,7 @@ export default function App() {
 
     const notificationMsg = {
       id: generateUUID(),
-      trip_id: activeTrip.id,
+      trip_id: safeTId,
       text: `💸 ${payerName} logged expense "${newExp.title}" (₹${Number(newExp.amount).toLocaleString()}). Split equal: ₹${perPerson} each for ${splitCount} people.`,
       is_system_event: true,
       created_at: new Date().toISOString()
@@ -450,17 +447,17 @@ export default function App() {
     if (!store.chatMessages) store.chatMessages = [];
     store.chatMessages.push(notificationMsg);
 
-    if (isValidUUID(activeTrip.id) && isValidUUID(newExp.paid_by)) {
+    if (isValidUUID(safeTId) && isValidUUID(newExp.paid_by)) {
       try {
         await supabase.from('expenses').insert({
-          trip_id: activeTrip.id,
+          trip_id: safeTId,
           title: newExp.title,
           amount: newExp.amount,
           paid_by: newExp.paid_by,
           category: newExp.category
         });
         await supabase.from('chat_messages').insert({
-          trip_id: activeTrip.id,
+          trip_id: safeTId,
           text: notificationMsg.text,
           is_system_event: true
         });
@@ -496,10 +493,11 @@ export default function App() {
   const handleSettleUp = async (fromMemberId, toMemberId, amount) => {
     if (!activeTrip) return;
 
+    const safeTId = ensureUUID(activeTrip.id);
     const store = getLocalStore();
     const newSettlement = {
       id: generateUUID(),
-      trip_id: activeTrip.id,
+      trip_id: safeTId,
       from_member_id: fromMemberId,
       to_member_id: toMemberId,
       amount: Number(amount),
@@ -514,7 +512,7 @@ export default function App() {
 
     const setMsg = {
       id: generateUUID(),
-      trip_id: activeTrip.id,
+      trip_id: safeTId,
       text: `✅ ${fromName} paid ₹${Number(amount).toLocaleString()} to ${toName} and settled up!`,
       is_system_event: true,
       created_at: new Date().toISOString()
@@ -523,16 +521,16 @@ export default function App() {
     if (!store.chatMessages) store.chatMessages = [];
     store.chatMessages.push(setMsg);
 
-    if (isValidUUID(activeTrip.id) && isValidUUID(fromMemberId) && isValidUUID(toMemberId)) {
+    if (isValidUUID(safeTId) && isValidUUID(fromMemberId) && isValidUUID(toMemberId)) {
       try {
         await supabase.from('settlements').insert({
-          trip_id: activeTrip.id,
+          trip_id: safeTId,
           from_member_id: fromMemberId,
           to_member_id: toMemberId,
           amount: Number(amount)
         });
         await supabase.from('chat_messages').insert({
-          trip_id: activeTrip.id,
+          trip_id: safeTId,
           text: setMsg.text,
           is_system_event: true
         });
@@ -551,10 +549,11 @@ export default function App() {
   const handleSendMessage = async (msgObj) => {
     if (!activeTrip) return;
 
+    const safeTId = ensureUUID(activeTrip.id);
     const store = getLocalStore();
     const newMsg = {
       id: generateUUID(),
-      trip_id: activeTrip.id,
+      trip_id: safeTId,
       ...msgObj,
       created_at: new Date().toISOString()
     };
@@ -562,10 +561,10 @@ export default function App() {
     if (!store.chatMessages) store.chatMessages = [];
     store.chatMessages.push(newMsg);
 
-    if (isValidUUID(activeTrip.id)) {
+    if (isValidUUID(safeTId)) {
       try {
         await supabase.from('chat_messages').insert({
-          trip_id: activeTrip.id,
+          trip_id: safeTId,
           sender_id: isValidUUID(msgObj.sender_id) ? msgObj.sender_id : null,
           text: msgObj.text,
           is_system_event: false
@@ -742,10 +741,11 @@ export default function App() {
             <form onSubmit={(e) => {
               e.preventDefault();
               if (!newFriendName.trim()) return;
+              const safeTId = ensureUUID(activeTrip.id);
               const store = getLocalStore();
               const newTM = {
                 id: generateUUID(),
-                trip_id: activeTrip.id,
+                trip_id: safeTId,
                 name: newFriendName.trim(),
                 email: `${newFriendName.trim().toLowerCase().replace(/\s+/g, '')}@college.edu`,
                 avatar_color: '#059669'
