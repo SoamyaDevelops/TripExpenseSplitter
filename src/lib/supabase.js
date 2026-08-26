@@ -60,6 +60,101 @@ export const updateUserProfile = async (userId, profileData) => {
   }
 };
 
+// REAL SUPABASE FRIENDSHIP DB FUNCTIONS
+export const sendSupabaseFriendRequest = async (requesterId, addresseeId) => {
+  try {
+    const { data, error } = await supabase
+      .from('friendships')
+      .upsert({
+        requester_id: requesterId,
+        addressee_id: addresseeId,
+        status: 'pending',
+        created_at: new Date().toISOString()
+      }, { onConflict: 'requester_id,addressee_id' });
+
+    if (error) throw error;
+    return { success: true, data };
+  } catch (err) {
+    console.error('Failed to send friend request in Supabase:', err);
+    return { success: false, error: err.message };
+  }
+};
+
+export const fetchSupabaseFriendships = async (userId) => {
+  if (!userId) return [];
+  try {
+    // Query friendships where user is requester or addressee
+    const { data, error } = await supabase
+      .from('friendships')
+      .select('*')
+      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+
+    if (error) {
+      console.warn('Supabase fetch friendships notice:', error.message);
+      return [];
+    }
+
+    if (!data || data.length === 0) return [];
+
+    // Fetch profiles for all involved user IDs to get full names, emails, avatars
+    const userIds = new Set();
+    data.forEach(f => {
+      userIds.add(f.requester_id);
+      userIds.add(f.addressee_id);
+    });
+
+    const { data: profileList } = await supabase
+      .from('profiles')
+      .select('id, full_name, email, avatar_color')
+      .in('id', Array.from(userIds));
+
+    const profileMap = {};
+    (profileList || []).forEach(p => { profileMap[p.id] = p; });
+
+    // Format rich friendship objects
+    const enriched = data.map(f => {
+      const reqP = profileMap[f.requester_id] || { full_name: 'Friend', email: '' };
+      const addP = profileMap[f.addressee_id] || { full_name: 'Friend', email: '' };
+      return {
+        ...f,
+        requester_name: reqP.full_name,
+        requester_email: reqP.email,
+        requester_color: reqP.avatar_color || '#4f46e5',
+        addressee_name: addP.full_name,
+        addressee_email: addP.email,
+        addressee_color: addP.avatar_color || '#059669'
+      };
+    });
+
+    return enriched;
+  } catch (err) {
+    console.error('Failed to fetch friendships from Supabase:', err);
+    return [];
+  }
+};
+
+export const respondSupabaseFriendRequest = async (friendshipId, newStatus) => {
+  try {
+    if (newStatus === 'rejected') {
+      const { error } = await supabase
+        .from('friendships')
+        .delete()
+        .eq('id', friendshipId);
+      if (error) throw error;
+    } else {
+      const { data, error } = await supabase
+        .from('friendships')
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq('id', friendshipId);
+      if (error) throw error;
+    }
+    return { success: true };
+  } catch (err) {
+    console.error('Failed to update friendship status in Supabase:', err);
+    return { success: false, error: err.message };
+  }
+};
+
 // Initial store fallback structure
 export const EMPTY_INITIAL_DATA = {
   groups: [],
@@ -74,14 +169,14 @@ export const EMPTY_INITIAL_DATA = {
 
 // Local storage state helpers
 export const getLocalStore = () => {
-  const data = localStorage.getItem('trip_split_friends_v5');
+  const data = localStorage.getItem('trip_split_friends_v6');
   if (!data) {
-    localStorage.setItem('trip_split_friends_v5', JSON.stringify(EMPTY_INITIAL_DATA));
+    localStorage.setItem('trip_split_friends_v6', JSON.stringify(EMPTY_INITIAL_DATA));
     return EMPTY_INITIAL_DATA;
   }
   return JSON.parse(data);
 };
 
 export const saveLocalStore = (data) => {
-  localStorage.setItem('trip_split_friends_v5', JSON.stringify(data));
+  localStorage.setItem('trip_split_friends_v6', JSON.stringify(data));
 };

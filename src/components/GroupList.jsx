@@ -1,24 +1,17 @@
 ﻿import React, { useState } from 'react';
-import { Users, Plus, Search, Compass, ChevronRight, UserPlus, Sparkles, X, Check } from 'lucide-react';
+import { Users, Plus, ChevronRight, X } from 'lucide-react';
 
 export default function GroupList({
   groups = [],
   allGroupMembers = [],
   allTrips = [],
   onSelectGroup,
-  onCreateGroup,
-  onSearchAndAddFriend
+  onCreateGroup
 }) {
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showSearchModal, setShowSearchModal] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [groupDesc, setGroupDesc] = useState('');
   const [initialMembers, setInitialMembers] = useState('');
-
-  // Search people state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [newFriendName, setNewFriendName] = useState('');
-  const [addedSuccessMsg, setAddedSuccessMsg] = useState('');
 
   const handleCreateSubmit = (e) => {
     e.preventDefault();
@@ -34,16 +27,6 @@ export default function GroupList({
     setGroupDesc('');
     setInitialMembers('');
     setShowCreateModal(false);
-  };
-
-  const handleAddFriendSubmit = (e) => {
-    e.preventDefault();
-    if (!newFriendName.trim()) return;
-
-    onSearchAndAddFriend(newFriendName.trim());
-    setAddedSuccessMsg(`Added "${newFriendName.trim()}" to your friends network!`);
-    setNewFriendName('');
-    setTimeout(() => setAddedSuccessMsg(''), 3000);
   };
 
   return (
@@ -66,20 +49,12 @@ export default function GroupList({
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <button
-            className="btn btn-secondary"
-            onClick={() => setShowSearchModal(true)}
-          >
-            <UserPlus size={16} /> Search & Add People
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={() => setShowCreateModal(true)}
-          >
-            <Plus size={18} /> Create New Group
-          </button>
-        </div>
+        <button
+          className="btn btn-primary"
+          onClick={() => setShowCreateModal(true)}
+        >
+          <Plus size={18} /> Create New Group
+        </button>
       </div>
 
       {/* Groups Grid */}
@@ -109,7 +84,6 @@ export default function GroupList({
           {groups.map(group => {
             const members = allGroupMembers.filter(m => m.group_id === group.id);
             const trips = allTrips.filter(t => t.group_id === group.id);
-            const activeTripsCount = trips.filter(t => t.status !== 'completed').length;
 
             return (
               <div
@@ -250,60 +224,6 @@ export default function GroupList({
               <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setShowCreateModal(false)}>Cancel</button>
                 <button type="submit" className="btn btn-primary">Create Group</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* SEARCH & ADD PEOPLE MODAL */}
-      {showSearchModal && (
-        <div className="modal-overlay" onClick={() => setShowSearchModal(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ padding: '1.75rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-              <div>
-                <h3 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Search & Add People</h3>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Add college friends to your friend network</p>
-              </div>
-              <button onClick={() => setShowSearchModal(false)} style={{ padding: '0.4rem', borderRadius: '50%', background: 'var(--bg-subtle)' }}>
-                <X size={16} />
-              </button>
-            </div>
-
-            {addedSuccessMsg && (
-              <div style={{
-                background: 'var(--success-bg)',
-                border: '1px solid var(--success-border)',
-                color: 'var(--success)',
-                padding: '0.65rem 0.85rem',
-                borderRadius: 'var(--radius-md)',
-                fontSize: '0.85rem',
-                marginBottom: '1rem',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem'
-              }}>
-                <Check size={16} /> {addedSuccessMsg}
-              </div>
-            )}
-
-            <form onSubmit={handleAddFriendSubmit}>
-              <div className="form-group">
-                <label className="form-label">Friend's Name or Email</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="e.g. Sanya Roy or sanya@college.edu"
-                  value={newFriendName}
-                  onChange={e => setNewFriendName(e.target.value)}
-                  required
-                  autoFocus
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setShowSearchModal(false)}>Done</button>
-                <button type="submit" className="btn btn-primary"><UserPlus size={14} /> Add Friend</button>
               </div>
             </form>
           </div>

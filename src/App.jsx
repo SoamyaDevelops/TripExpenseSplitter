@@ -10,7 +10,14 @@ import SettlementView from './components/SettlementView';
 import TripChat from './components/TripChat';
 import ProfileModal from './components/ProfileModal';
 import FriendsManager from './components/FriendsManager';
-import { supabase, getLocalStore, saveLocalStore } from './lib/supabase';
+import {
+  supabase,
+  getLocalStore,
+  saveLocalStore,
+  sendSupabaseFriendRequest,
+  fetchSupabaseFriendships,
+  respondSupabaseFriendRequest
+} from './lib/supabase';
 import { User, Receipt, Zap, MessageSquare, ArrowLeft, UserPlus } from 'lucide-react';
 import './App.css';
 
@@ -65,16 +72,35 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Poll for live friendship requests every 4 seconds
+  useEffect(() => {
+    if (!userProfile?.id) return;
+
+    const loadFriendships = async () => {
+      const live = await fetchSupabaseFriendships(userProfile.id);
+      if (live && live.length > 0) {
+        setFriendships(live);
+        const store = getLocalStore();
+        store.friendships = live;
+        saveLocalStore(store);
+      }
+    };
+
+    loadFriendships();
+    const interval = setInterval(loadFriendships, 4000);
+    return () => clearInterval(interval);
+  }, [userProfile?.id]);
+
   const fetchSupabaseUserProfile = async (user) => {
     try {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', user.id)
         .single();
 
       if (data) {
-        setUserProfile({
+        const profileObj = {
           id: data.id,
           name: data.full_name || user.email.split('@')[0],
           full_name: data.full_name,
@@ -82,7 +108,14 @@ export default function App() {
           phone: data.phone || '',
           bio: data.bio || '',
           avatar_color: data.avatar_color || '#4f46e5'
-        });
+        };
+        setUserProfile(profileObj);
+
+        // Fetch friendships for this profile
+        const liveFriendships = await fetchSupabaseFriendships(data.id);
+        if (liveFriendships && liveFriendships.length > 0) {
+          setFriendships(liveFriendships);
+        }
       } else {
         setUserProfile({
           id: user.id,
@@ -198,11 +231,16 @@ export default function App() {
     setViewMode('group_detail');
   };
 
-  // FRIEND REQUEST HANDLERS
-  const handleSendFriendRequest = (targetProfile) => {
-    const store = getLocalStore();
+  // FRIEND REQUEST HANDLERS WITH LIVE SUPABASE PERSISTENCE
+  const handleSendFriendRequest = async (targetProfile) => {
+    if (!userProfile?.id) return;
+
+    // Persist to Supabase DB
+    const res = await sendSupabaseFriendRequest(userProfile.id, targetProfile.id);
+
+    // Also update local state
     const newRequest = {
-      id: `fr-${Date.now()}`,
+      id: res.data?.[0]?.id || `fr-${Date.now()}`,
       requester_id: userProfile.id,
       requester_name: userProfile.name || userProfile.full_name,
       requester_email: userProfile.email,
@@ -214,6 +252,7 @@ export default function App() {
       created_at: new Date().toISOString()
     };
 
+    const store = getLocalStore();
     if (!store.friendships) store.friendships = [];
     store.friendships.unshift(newRequest);
     saveLocalStore(store);
@@ -221,7 +260,9 @@ export default function App() {
     setFriendships([...store.friendships]);
   };
 
-  const handleAcceptFriendRequest = (friendshipId) => {
+  const handleAcceptFriendRequest = async (friendshipId) => {
+    await respondSupabaseFriendRequest(friendshipId, 'accepted');
+
     const store = getLocalStore();
     store.friendships = (store.friendships || []).map(f => {
       if (f.id === friendshipId) {
@@ -234,7 +275,9 @@ export default function App() {
     setFriendships([...store.friendships]);
   };
 
-  const handleRejectFriendRequest = (friendshipId) => {
+  const handleRejectFriendRequest = async (friendshipId) => {
+    await respondSupabaseFriendRequest(friendshipId, 'rejected');
+
     const store = getLocalStore();
     store.friendships = (store.friendships || []).filter(f => f.id !== friendshipId);
 
@@ -451,7 +494,6 @@ export default function App() {
             allTrips={trips}
             onSelectGroup={handleSelectGroup}
             onCreateGroup={handleCreateGroup}
-            onSearchAndAddFriend={() => setShowFriendsModal(true)}
           />
         )}
 
