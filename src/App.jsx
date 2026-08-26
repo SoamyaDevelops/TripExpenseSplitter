@@ -7,8 +7,8 @@ import AddExpenseModal from './components/AddExpenseModal';
 import SettlementView from './components/SettlementView';
 import TripSelector from './components/TripSelector';
 import SqlScriptModal from './components/SqlScriptModal';
-import { supabase, getLocalStore, saveLocalStore, DEMO_SAMPLE_DATA } from './lib/supabase';
-import { User, Receipt, Zap, Plus, Compass, Users, UserPlus, ArrowRight } from 'lucide-react';
+import { supabase, getLocalStore, saveLocalStore } from './lib/supabase';
+import { User, Receipt, Zap, Compass, UserPlus, ArrowRight } from 'lucide-react';
 import './App.css';
 
 export default function App() {
@@ -25,9 +25,8 @@ export default function App() {
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
   const [isTripSelectorOpen, setIsTripSelectorOpen] = useState(false);
   const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
-  const [usingDemoMode, setUsingDemoMode] = useState(false);
 
-  // New trip creation state for clean onboarding
+  // New trip creation state for onboarding
   const [onboardTripName, setOnboardTripName] = useState('');
   const [onboardUserName, setOnboardUserName] = useState('');
   const [onboardFriends, setOnboardFriends] = useState('');
@@ -45,8 +44,7 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         setSessionUser(session.user);
-        setUsingDemoMode(false);
-      } else if (!usingDemoMode) {
+      } else {
         setSessionUser(null);
       }
     });
@@ -85,31 +83,6 @@ export default function App() {
     loadTripDetails(trip.id);
   };
 
-  // Demo sample dataset loader (optional for testing)
-  const handleLoadSampleData = () => {
-    saveLocalStore(DEMO_SAMPLE_DATA);
-    loadData();
-    setUsingDemoMode(true);
-    const defaultTrip = DEMO_SAMPLE_DATA.trips[0];
-    setActiveTrip(defaultTrip);
-    loadTripDetails(defaultTrip.id, DEMO_SAMPLE_DATA);
-    setSessionUser({ id: 'demo-user-id', email: 'aarav@college.edu' });
-  };
-
-  // Quick guest login
-  const handleDemoLogin = (memberId = 'm-1') => {
-    if (trips.length === 0) {
-      handleLoadSampleData();
-      return;
-    }
-    setUsingDemoMode(true);
-    const store = getLocalStore();
-    const defaultTrip = store.trips[0];
-    setActiveTrip(defaultTrip);
-    loadTripDetails(defaultTrip.id, store);
-    setSessionUser({ id: 'demo-user-id', email: 'user@college.edu' });
-  };
-
   // Create First Trip Onboarding Form
   const handleCreateFirstTrip = (e) => {
     e.preventDefault();
@@ -128,7 +101,7 @@ export default function App() {
     store.trips.unshift(newTrip);
 
     // Add user member
-    const myName = onboardUserName.trim() || 'Me';
+    const myName = onboardUserName.trim() || sessionUser?.user_metadata?.full_name || 'Me';
     const colorList = ['#4f46e5', '#059669', '#d97706', '#e11d48', '#0284c7', '#7c3aed'];
     
     const userMember = {
@@ -159,7 +132,6 @@ export default function App() {
     setTrips([newTrip, ...trips]);
     setActiveTrip(newTrip);
     loadTripDetails(newTrip.id, store);
-    setUsingDemoMode(true);
   };
 
   // Add friend to active trip
@@ -248,7 +220,7 @@ export default function App() {
     const defaultMember = {
       id: `m-${Date.now()}`,
       trip_id: newTrip.id,
-      name: currentMember ? currentMember.name : 'Me',
+      name: currentMember ? currentMember.name : (sessionUser?.user_metadata?.full_name || 'Me'),
       email: sessionUser?.email || 'me@college.edu',
       avatar_color: '#4f46e5'
     };
@@ -294,14 +266,12 @@ export default function App() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setSessionUser(null);
-    setUsingDemoMode(false);
   };
 
   if (!sessionUser) {
     return (
       <Auth
         onLoginSuccess={(user) => setSessionUser(user)}
-        onDemoLogin={handleDemoLogin}
       />
     );
   }
@@ -356,7 +326,7 @@ export default function App() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Your Name</label>
+                <label className="form-label">Your Display Name</label>
                 <input
                   type="text"
                   className="form-control"
@@ -382,17 +352,6 @@ export default function App() {
                 Start Trip & Split Expenses <ArrowRight size={16} />
               </button>
             </form>
-
-            <div style={{ marginTop: '1.5rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border-color)', textAlign: 'center' }}>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={handleLoadSampleData}
-                style={{ width: '100%', justifyContent: 'center' }}
-              >
-                Load Sample Goa Trip Data (To Test UI)
-              </button>
-            </div>
           </div>
         </main>
         <SqlScriptModal isOpen={isSqlModalOpen} onClose={() => setIsSqlModalOpen(false)} />

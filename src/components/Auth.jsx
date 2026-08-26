@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Compass, LogIn, UserPlus, Sparkles, CheckCircle2, ShieldCheck, ArrowRight } from 'lucide-react';
+import { Compass, LogIn, UserPlus, CheckCircle2, ShieldCheck } from 'lucide-react';
 
-export default function Auth({ onLoginSuccess, onDemoLogin }) {
+export default function Auth({ onLoginSuccess }) {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -35,7 +35,7 @@ export default function Auth({ onLoginSuccess, onDemoLogin }) {
         if (data.session) {
           onLoginSuccess(data.user);
         } else {
-          setSuccessMsg('Account created! Check your email for verification link, or use Demo Mode to test immediately.');
+          setSuccessMsg('Account created! Please check your email for the confirmation link to sign in.');
         }
       } else {
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -47,8 +47,7 @@ export default function Auth({ onLoginSuccess, onDemoLogin }) {
         onLoginSuccess(data.user);
       }
     } catch (err) {
-      console.warn('Supabase Auth Notice:', err.message);
-      setErrorMsg(err.message || 'Authentication error. You can use Quick Demo Mode below!');
+      setErrorMsg(err.message || 'Authentication failed. Please check your credentials.');
     } finally {
       setLoading(false);
     }
@@ -75,7 +74,7 @@ export default function Auth({ onLoginSuccess, onDemoLogin }) {
             borderRadius: '16px',
             background: 'var(--primary)',
             color: 'white',
-            boxShadow: '0 10px 25px rgba(79, 70, 229, 0.3)',
+            boxShadow: '0 10px 25px rgba(79, 70, 229, 0.25)',
             marginBottom: '0.75rem'
           }}>
             <Compass size={32} />
@@ -93,12 +92,14 @@ export default function Auth({ onLoginSuccess, onDemoLogin }) {
           {/* Toggle Switch */}
           <div className="tab-navigation" style={{ marginBottom: '1.5rem' }}>
             <button
+              type="button"
               className={`tab-btn ${!isSignUp ? 'active' : ''}`}
               onClick={() => { setIsSignUp(false); setErrorMsg(null); setSuccessMsg(null); }}
             >
               <LogIn size={16} /> Sign In
             </button>
             <button
+              type="button"
               className={`tab-btn ${isSignUp ? 'active' : ''}`}
               onClick={() => { setIsSignUp(true); setErrorMsg(null); setSuccessMsg(null); }}
             >
@@ -182,29 +183,9 @@ export default function Auth({ onLoginSuccess, onDemoLogin }) {
               style={{ width: '100%', padding: '0.85rem', marginTop: '0.5rem' }}
               disabled={loading}
             >
-              {loading ? 'Connecting...' : (isSignUp ? 'Create Account' : 'Sign In to TripSplit')}
+              {loading ? 'Authenticating...' : (isSignUp ? 'Create Account' : 'Sign In to TripSplit')}
             </button>
           </form>
-
-          {/* Quick Demo Mode Bar */}
-          <div style={{
-            marginTop: '1.75rem',
-            paddingTop: '1.25rem',
-            borderTop: '1px solid var(--border-color)',
-            textAlign: 'center'
-          }}>
-            <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
-              Or explore instantly without database configuration:
-            </p>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              style={{ width: '100%', justifyContent: 'center' }}
-              onClick={() => onDemoLogin('m-1')}
-            >
-              <Sparkles size={16} color="var(--primary)" /> Launch Fast Demo Mode <ArrowRight size={14} />
-            </button>
-          </div>
         </div>
 
         {/* Footer info */}
@@ -218,7 +199,7 @@ export default function Auth({ onLoginSuccess, onDemoLogin }) {
           justifyContent: 'center',
           gap: '4px'
         }}>
-          <ShieldCheck size={14} /> Powered by Supabase Backend
+          <ShieldCheck size={14} /> Powered by Supabase Authentication
         </p>
       </div>
     </div>
