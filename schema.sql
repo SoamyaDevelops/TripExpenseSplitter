@@ -1,6 +1,7 @@
 ﻿-- ====================================================================
--- TRIP SPLIT: COMPLETE SUPABASE DATABASE SETUP SCRIPT (WITH FRIENDSHIPS)
+-- TRIP SPLIT: IDEMPOTENT SUPABASE DATABASE SETUP SCRIPT
 -- Copy and run this script in your Supabase SQL Editor (https://supabase.com/dashboard)
+-- Safe to re-run multiple times!
 -- ====================================================================
 
 -- 1. Enable UUID Extension
@@ -140,7 +141,7 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- ====================================================================
--- ROW LEVEL SECURITY (RLS) POLICIES
+-- ROW LEVEL SECURITY (RLS) POLICIES (SAFE DROP & RE-CREATE)
 -- ====================================================================
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.friendships ENABLE ROW LEVEL SECURITY;
@@ -153,44 +154,86 @@ ALTER TABLE public.expense_splits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.settlements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 
+-- Profiles Policies
+DROP POLICY IF EXISTS "Allow public select profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Allow user insert profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Allow user update profiles" ON public.profiles;
 CREATE POLICY "Allow public select profiles" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Allow user insert profiles" ON public.profiles FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow user update profiles" ON public.profiles FOR UPDATE USING (true);
 
+-- Friendships Policies
+DROP POLICY IF EXISTS "Allow public select friendships" ON public.friendships;
+DROP POLICY IF EXISTS "Allow public insert friendships" ON public.friendships;
+DROP POLICY IF EXISTS "Allow public update friendships" ON public.friendships;
+DROP POLICY IF EXISTS "Allow public delete friendships" ON public.friendships;
 CREATE POLICY "Allow public select friendships" ON public.friendships FOR SELECT USING (true);
 CREATE POLICY "Allow public insert friendships" ON public.friendships FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update friendships" ON public.friendships FOR UPDATE USING (true);
 CREATE POLICY "Allow public delete friendships" ON public.friendships FOR DELETE USING (true);
 
+-- Groups Policies
+DROP POLICY IF EXISTS "Allow public select groups" ON public.groups;
+DROP POLICY IF EXISTS "Allow public insert groups" ON public.groups;
+DROP POLICY IF EXISTS "Allow public update groups" ON public.groups;
+DROP POLICY IF EXISTS "Allow public delete groups" ON public.groups;
 CREATE POLICY "Allow public select groups" ON public.groups FOR SELECT USING (true);
 CREATE POLICY "Allow public insert groups" ON public.groups FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update groups" ON public.groups FOR UPDATE USING (true);
 CREATE POLICY "Allow public delete groups" ON public.groups FOR DELETE USING (true);
 
+-- Group Members Policies
+DROP POLICY IF EXISTS "Allow public select group_members" ON public.group_members;
+DROP POLICY IF EXISTS "Allow public insert group_members" ON public.group_members;
+DROP POLICY IF EXISTS "Allow public update group_members" ON public.group_members;
+DROP POLICY IF EXISTS "Allow public delete group_members" ON public.group_members;
 CREATE POLICY "Allow public select group_members" ON public.group_members FOR SELECT USING (true);
 CREATE POLICY "Allow public insert group_members" ON public.group_members FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update group_members" ON public.group_members FOR UPDATE USING (true);
 CREATE POLICY "Allow public delete group_members" ON public.group_members FOR DELETE USING (true);
 
+-- Trips Policies
+DROP POLICY IF EXISTS "Allow public select trips" ON public.trips;
+DROP POLICY IF EXISTS "Allow public insert trips" ON public.trips;
+DROP POLICY IF EXISTS "Allow public update trips" ON public.trips;
 CREATE POLICY "Allow public select trips" ON public.trips FOR SELECT USING (true);
 CREATE POLICY "Allow public insert trips" ON public.trips FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update trips" ON public.trips FOR UPDATE USING (true);
 
+-- Trip Members Policies
+DROP POLICY IF EXISTS "Allow public select trip_members" ON public.trip_members;
+DROP POLICY IF EXISTS "Allow public insert trip_members" ON public.trip_members;
+DROP POLICY IF EXISTS "Allow public update trip_members" ON public.trip_members;
 CREATE POLICY "Allow public select trip_members" ON public.trip_members FOR SELECT USING (true);
 CREATE POLICY "Allow public insert trip_members" ON public.trip_members FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update trip_members" ON public.trip_members FOR UPDATE USING (true);
 
+-- Expenses Policies
+DROP POLICY IF EXISTS "Allow public select expenses" ON public.expenses;
+DROP POLICY IF EXISTS "Allow public insert expenses" ON public.expenses;
+DROP POLICY IF EXISTS "Allow public update expenses" ON public.expenses;
+DROP POLICY IF EXISTS "Allow public delete expenses" ON public.expenses;
 CREATE POLICY "Allow public select expenses" ON public.expenses FOR SELECT USING (true);
 CREATE POLICY "Allow public insert expenses" ON public.expenses FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update expenses" ON public.expenses FOR UPDATE USING (true);
 CREATE POLICY "Allow public delete expenses" ON public.expenses FOR DELETE USING (true);
 
+-- Expense Splits Policies
+DROP POLICY IF EXISTS "Allow public select expense_splits" ON public.expense_splits;
+DROP POLICY IF EXISTS "Allow public insert expense_splits" ON public.expense_splits;
+DROP POLICY IF EXISTS "Allow public update expense_splits" ON public.expense_splits;
 CREATE POLICY "Allow public select expense_splits" ON public.expense_splits FOR SELECT USING (true);
 CREATE POLICY "Allow public insert expense_splits" ON public.expense_splits FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update expense_splits" ON public.expense_splits FOR UPDATE USING (true);
 
+-- Settlements Policies
+DROP POLICY IF EXISTS "Allow public select settlements" ON public.settlements;
+DROP POLICY IF EXISTS "Allow public insert settlements" ON public.settlements;
 CREATE POLICY "Allow public select settlements" ON public.settlements FOR SELECT USING (true);
 CREATE POLICY "Allow public insert settlements" ON public.settlements FOR INSERT WITH CHECK (true);
 
+-- Chat Messages Policies
+DROP POLICY IF EXISTS "Allow public select chat_messages" ON public.chat_messages;
+DROP POLICY IF EXISTS "Allow public insert chat_messages" ON public.chat_messages;
 CREATE POLICY "Allow public select chat_messages" ON public.chat_messages FOR SELECT USING (true);
 CREATE POLICY "Allow public insert chat_messages" ON public.chat_messages FOR INSERT WITH CHECK (true);
